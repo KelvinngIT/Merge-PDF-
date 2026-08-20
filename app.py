@@ -5,7 +5,6 @@ import re
 import random
 import string
 import io
-import base64
 
 # ======================
 # Page Config
@@ -27,7 +26,6 @@ def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
 
 def merge_pdfs(uploaded_files):
-    """Merge multiple uploaded PDF files into one PdfWriter object"""
     writer = PdfWriter()
     for uploaded_file in uploaded_files:
         try:
@@ -39,18 +37,21 @@ def merge_pdfs(uploaded_files):
             return None
     return writer
 
-def display_pdf(file_bytes):
-    """Display PDF in the browser using base64"""
-    base64_pdf = base64.b64encode(file_bytes).decode("utf-8")
-    pdf_display = f"""
-        <iframe 
-            src="data:application/pdf;base64,{base64_pdf}" 
-            width="100%" 
-            height="800px" 
-            type="application/pdf">
-        </iframe>
-    """
-    st.markdown(pdf_display, unsafe_allow_html=True)
+def extract_pages(pdf_bytes, selected_pages):
+    """Extract selected pages (1-based index) from PDF"""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    
+    for page_num in selected_pages:
+        # Convert to 0-based index
+        idx = page_num - 1
+        if 0 <= idx < len(reader.pages):
+            writer.add_page(reader.pages[idx])
+    
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # ======================
 # Session State Init
@@ -71,6 +72,8 @@ if "single_pdf_bytes" not in st.session_state:
     st.session_state.single_pdf_bytes = None
 if "single_pdf_name" not in st.session_state:
     st.session_state.single_pdf_name = None
+if "total_pages" not in st.session_state:
+    st.session_state.total_pages = 0
 
 # ======================
 # Sidebar - Login
@@ -133,6 +136,7 @@ else:
         st.session_state.merged_pdf = None
         st.session_state.single_pdf_bytes = None
         st.session_state.single_pdf_name = None
+        st.session_state.total_pages = 0
         st.rerun()
 
 # ======================
@@ -143,12 +147,11 @@ if not st.session_state.logged_in:
     st.info("👈 Please login with your email in the sidebar to continue.")
     st.stop()
 
-# ----- Logged-in content -----
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
 # Create two tabs
-tab1, tab2 = st.tabs(["🔗 Combine Multiple PDFs", "👁️ View & Download Single PDF"])
+tab1, tab2 = st.tabs(["🔗 Combine Multiple PDFs", "📄 Select Pages & Download"])
 
 # =====================================================
 # TAB 1: Combine Multiple PDFs
@@ -200,7 +203,6 @@ with tab1:
             key="merge_custom_name"
         )
         
-        # Ensure it ends with .pdf
         if not custom_name.lower().endswith(".pdf"):
             custom_name += ".pdf"
         
@@ -217,11 +219,11 @@ with tab1:
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
 
 # =====================================================
-# TAB 2: View & Download Single PDF
+# TAB 2: Select Pages & Download
 # =====================================================
 with tab2:
-    st.subheader("View PDF & Download with Custom Name")
-    st.markdown("Upload a PDF → Preview it on screen → Download it with your own file name")
+    st.subheader("Select Pages from PDF & Download")
+    st.markdown("Upload a PDF → Choose which pages you want → Download with your own file name")
 
     single_file = st.file_uploader(
         "Upload a PDF file",
@@ -231,61 +233,44 @@ with tab2:
     )
 
     if single_file is not None:
-        # Read the file into memory
+        # Read the file
         pdf_bytes = single_file.read()
         st.session_state.single_pdf_bytes = pdf_bytes
         st.session_state.single_pdf_name = single_file.name
 
-        st.success(f"✅ Uploaded: **{single_file.name}** ({len(pdf_bytes)/1024:.1f} KB)")
-
-        # Show number of pages
+        # Get total pages
         try:
             reader = PdfReader(io.BytesIO(pdf_bytes))
-            st.info(f"This PDF has **{len(reader.pages)}** page(s)")
-        except:
-            st.warning("Could not read page count.")
+            total_pages = len(reader.pages)
+            st.session_state.total_pages = total_pages
+        except Exception as e:
+            st.error(f"Cannot read this PDF: {e}")
+            st.stop()
+
+        st.success(f"✅ Uploaded: **{single_file.name}**")
+        st.info(f"This PDF has **{total_pages}** page(s)")
 
         st.markdown("---")
-        st.subheader("📄 PDF Preview")
+        st.subheader("1️⃣ Select Pages")
 
-        # Display the PDF
-        display_pdf(pdf_bytes)
-
-        st.markdown("---")
-        st.subheader("Download with Custom Name")
-
-        # Suggest a default name
-        original_name = single_file.name
-        if original_name.lower().endswith(".pdf"):
-            original_name = original_name[:-4]
-
-        custom_filename = st.text_input(
-            "Enter your preferred file name",
-            value=original_name,
-            key="single_custom_name",
-            help="You don't need to type .pdf – it will be added automatically"
+        # Page selection options
+        selection_mode = st.radio(
+            "How do you want to select pages?",
+            options=["Select specific pages", "Select page range", "Download all pages"],
+            horizontal=True
         )
 
-        # Clean the filename
-        custom_filename = custom_filename.strip()
-        if not custom_filename:
-            custom_filename = "downloaded_file"
-        
-        if not custom_filename.lower().endswith(".pdf"):
-            custom_filename += ".pdf"
+        selected_pages = []
 
-        st.download_button(
-            label="📥 Download PDF with Custom Name",
-            data=pdf_bytes,
-            file_name=custom_filename,
-            mime="application/pdf",
-            use_container_width=True,
-            type="primary",
-            key="download_single"
-        )
+        if selection_mode == "Select specific pages":
+            # Multi-select
+            page_options = list(range(1, total_pages + 1))
+            selected_pages = st.multiselect(
+                "Choose pages (you can select multiple)",
+                options=page_options,
+                default=[1] if total_pages >= 1 else [],
+                help="Hold Ctrl (or Cmd on Mac) to select multiple pages"
+            )
 
-        st.caption(f"Will be downloaded as: **{custom_filename}**")
-
-# Footer
-st.markdown("---")
-st.caption("💡 Tip: For best PDF preview experience, use Chrome or Edge browser.")
+        elif selection_mode == "Select page range":
+            col
