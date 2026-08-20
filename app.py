@@ -43,7 +43,6 @@ def extract_pages(pdf_bytes, selected_pages):
     writer = PdfWriter()
     
     for page_num in selected_pages:
-        # Convert to 0-based index
         idx = page_num - 1
         if 0 <= idx < len(reader.pages):
             writer.add_page(reader.pages[idx])
@@ -150,7 +149,6 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-# Create two tabs
 tab1, tab2 = st.tabs(["🔗 Combine Multiple PDFs", "📄 Select Pages & Download"])
 
 # =====================================================
@@ -233,12 +231,10 @@ with tab2:
     )
 
     if single_file is not None:
-        # Read the file
         pdf_bytes = single_file.read()
         st.session_state.single_pdf_bytes = pdf_bytes
         st.session_state.single_pdf_name = single_file.name
 
-        # Get total pages
         try:
             reader = PdfReader(io.BytesIO(pdf_bytes))
             total_pages = len(reader.pages)
@@ -253,7 +249,6 @@ with tab2:
         st.markdown("---")
         st.subheader("1️⃣ Select Pages")
 
-        # Page selection options
         selection_mode = st.radio(
             "How do you want to select pages?",
             options=["Select specific pages", "Select page range", "Download all pages"],
@@ -263,7 +258,6 @@ with tab2:
         selected_pages = []
 
         if selection_mode == "Select specific pages":
-            # Multi-select
             page_options = list(range(1, total_pages + 1))
             selected_pages = st.multiselect(
                 "Choose pages (you can select multiple)",
@@ -273,4 +267,66 @@ with tab2:
             )
 
         elif selection_mode == "Select page range":
-            col
+            col1, col2 = st.columns(2)
+            with col1:
+                start_page = st.number_input("From page", min_value=1, max_value=total_pages, value=1)
+            with col2:
+                end_page = st.number_input("To page", min_value=1, max_value=total_pages, value=total_pages)
+            
+            if start_page > end_page:
+                st.warning("Start page cannot be greater than end page.")
+            else:
+                selected_pages = list(range(start_page, end_page + 1))
+                st.write(f"Selected pages: **{start_page} to {end_page}** ({len(selected_pages)} pages)")
+
+        else:
+            selected_pages = list(range(1, total_pages + 1))
+            st.write(f"All **{total_pages}** pages will be included.")
+
+        st.markdown("---")
+        st.subheader("2️⃣ Download Selected Pages")
+
+        if selected_pages:
+            original_name = single_file.name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            custom_filename = st.text_input(
+                "Enter your preferred file name",
+                value=f"{original_name}_selected",
+                key="single_custom_name",
+                help="You don't need to type .pdf – it will be added automatically"
+            )
+
+            custom_filename = custom_filename.strip()
+            if not custom_filename:
+                custom_filename = "selected_pages"
+            
+            if not custom_filename.lower().endswith(".pdf"):
+                custom_filename += ".pdf"
+
+            try:
+                with st.spinner("Preparing your PDF..."):
+                    extracted_pdf = extract_pages(pdf_bytes, selected_pages)
+
+                st.download_button(
+                    label="📥 Download Selected Pages",
+                    data=extracted_pdf,
+                    file_name=custom_filename,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_selected"
+                )
+
+                st.success(f"Ready to download **{len(selected_pages)}** page(s)")
+                st.caption(f"File name: **{custom_filename}**")
+                st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
+
+            except Exception as e:
+                st.error(f"Error preparing PDF: {e}")
+        else:
+            st.warning("Please select at least one page.")
+
+st.markdown("---")
+st.caption("💡 Tip: Use Chrome or Edge for the best experience.")
