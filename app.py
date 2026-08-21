@@ -41,12 +41,36 @@ def extract_pages(pdf_bytes, selected_pages):
     """Extract selected pages (1-based index) from PDF"""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
-    
+   
     for page_num in selected_pages:
         idx = page_num - 1
         if 0 <= idx < len(reader.pages):
             writer.add_page(reader.pages[idx])
-    
+   
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def rotate_pages(pdf_bytes, selected_pages, angle):
+    """
+    Rotate selected pages (1-based index) by the given angle (clockwise).
+    Angle must be a multiple of 90 (typically 90, 180, 270).
+    Non-selected pages are kept as-is.
+    """
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+
+    selected_set = set(selected_pages)
+
+    for i, page in enumerate(reader.pages):
+        page_num = i + 1  # 1-based
+        if page_num in selected_set:
+            # rotate() returns the page object after rotation
+            writer.add_page(page.rotate(angle))
+        else:
+            writer.add_page(page)
+
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -84,7 +108,7 @@ if not st.session_state.logged_in:
         with st.sidebar.form("email_form"):
             email = st.text_input("Email address", placeholder="you@example.com")
             send_btn = st.form_submit_button("Send Verification Code", use_container_width=True, type="primary")
-            
+           
             if send_btn:
                 email = email.strip().lower()
                 if not email:
@@ -101,7 +125,7 @@ if not st.session_state.logged_in:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
         st.sidebar.caption("In a real app this code would be sent by email.")
-        
+       
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -109,13 +133,13 @@ if not st.session_state.logged_in:
                 verify_btn = st.form_submit_button("Verify & Login", use_container_width=True, type="primary")
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-            
+           
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-            
+           
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
@@ -149,7 +173,11 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-tab1, tab2 = st.tabs(["🔗 Combine Multiple PDFs", "📄 Select Pages & Download"])
+tab1, tab2, tab3 = st.tabs([
+    "🔗 Combine Multiple PDFs",
+    "📄 Select Pages & Download",
+    "🔄 Rotate Pages"
+])
 
 # =====================================================
 # TAB 1: Combine Multiple PDFs
@@ -168,17 +196,17 @@ with tab1:
 
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
-        
+       
         st.markdown("**Files in merge order:**")
         for i, f in enumerate(uploaded_files, 1):
             st.write(f"{i}. `{f.name}` ({f.size / 1024:.1f} KB)")
 
         st.markdown("---")
-        
+       
         if st.button("🔗 Combine All PDFs", type="primary", use_container_width=True, key="merge_btn"):
             with st.spinner("Merging PDFs..."):
                 writer = merge_pdfs(uploaded_files)
-                
+               
                 if writer is not None:
                     buffer = io.BytesIO()
                     writer.write(buffer)
@@ -191,19 +219,19 @@ with tab1:
     if st.session_state.merged_pdf is not None:
         st.markdown("---")
         st.subheader("Download Combined PDF")
-        
+       
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"combined_{timestamp}.pdf"
-        
+       
         custom_name = st.text_input(
             "Custom file name (optional)",
             value=default_name,
             key="merge_custom_name"
         )
-        
+       
         if not custom_name.lower().endswith(".pdf"):
             custom_name += ".pdf"
-        
+       
         st.download_button(
             label="📥 Download Combined PDF",
             data=st.session_state.merged_pdf,
@@ -213,7 +241,7 @@ with tab1:
             type="primary",
             key="download_merged"
         )
-        
+       
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
 
 # =====================================================
@@ -252,7 +280,8 @@ with tab2:
         selection_mode = st.radio(
             "How do you want to select pages?",
             options=["Select specific pages", "Select page range", "Download all pages"],
-            horizontal=True
+            horizontal=True,
+            key="select_mode"
         )
 
         selected_pages = []
@@ -263,22 +292,21 @@ with tab2:
                 "Choose pages (you can select multiple)",
                 options=page_options,
                 default=[1] if total_pages >= 1 else [],
-                help="Hold Ctrl (or Cmd on Mac) to select multiple pages"
+                help="Hold Ctrl (or Cmd on Mac) to select multiple pages",
+                key="select_multiselect"
             )
-
         elif selection_mode == "Select page range":
             col1, col2 = st.columns(2)
             with col1:
-                start_page = st.number_input("From page", min_value=1, max_value=total_pages, value=1)
+                start_page = st.number_input("From page", min_value=1, max_value=total_pages, value=1, key="select_start")
             with col2:
-                end_page = st.number_input("To page", min_value=1, max_value=total_pages, value=total_pages)
-            
+                end_page = st.number_input("To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end")
+           
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
             else:
                 selected_pages = list(range(start_page, end_page + 1))
                 st.write(f"Selected pages: **{start_page} to {end_page}** ({len(selected_pages)} pages)")
-
         else:
             selected_pages = list(range(1, total_pages + 1))
             st.write(f"All **{total_pages}** pages will be included.")
@@ -301,7 +329,7 @@ with tab2:
             custom_filename = custom_filename.strip()
             if not custom_filename:
                 custom_filename = "selected_pages"
-            
+           
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
 
@@ -318,15 +346,137 @@ with tab2:
                     type="primary",
                     key="download_selected"
                 )
-
                 st.success(f"Ready to download **{len(selected_pages)}** page(s)")
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
-
             except Exception as e:
                 st.error(f"Error preparing PDF: {e}")
         else:
             st.warning("Please select at least one page.")
+
+# =====================================================
+# TAB 3: Rotate Pages
+# =====================================================
+with tab3:
+    st.subheader("Rotate Pages in PDF")
+    st.markdown("Upload a PDF → Select pages → Choose rotation angle → Download the rotated file")
+
+    rotate_file = st.file_uploader(
+        "Upload a PDF file to rotate",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="rotate_uploader"
+    )
+
+    if rotate_file is not None:
+        rotate_pdf_bytes = rotate_file.read()
+
+        try:
+            reader = PdfReader(io.BytesIO(rotate_pdf_bytes))
+            total_pages = len(reader.pages)
+        except Exception as e:
+            st.error(f"Cannot read this PDF: {e}")
+            st.stop()
+
+        st.success(f"✅ Uploaded: **{rotate_file.name}**")
+        st.info(f"This PDF has **{total_pages}** page(s)")
+
+        st.markdown("---")
+        st.subheader("1️⃣ Select Pages to Rotate")
+
+        rotate_mode = st.radio(
+            "How do you want to select pages?",
+            options=["Select specific pages", "Select page range", "Rotate all pages"],
+            horizontal=True,
+            key="rotate_mode"
+        )
+
+        pages_to_rotate = []
+
+        if rotate_mode == "Select specific pages":
+            page_options = list(range(1, total_pages + 1))
+            pages_to_rotate = st.multiselect(
+                "Choose pages to rotate",
+                options=page_options,
+                default=[1] if total_pages >= 1 else [],
+                help="Hold Ctrl (or Cmd on Mac) to select multiple pages",
+                key="rotate_multiselect"
+            )
+        elif rotate_mode == "Select page range":
+            col1, col2 = st.columns(2)
+            with col1:
+                start_page = st.number_input(
+                    "From page", min_value=1, max_value=total_pages, value=1, key="rotate_start"
+                )
+            with col2:
+                end_page = st.number_input(
+                    "To page", min_value=1, max_value=total_pages, value=total_pages, key="rotate_end"
+                )
+
+            if start_page > end_page:
+                st.warning("Start page cannot be greater than end page.")
+            else:
+                pages_to_rotate = list(range(start_page, end_page + 1))
+                st.write(f"Pages to rotate: **{start_page} to {end_page}** ({len(pages_to_rotate)} pages)")
+        else:
+            pages_to_rotate = list(range(1, total_pages + 1))
+            st.write(f"All **{total_pages}** pages will be rotated.")
+
+        st.markdown("---")
+        st.subheader("2️⃣ Choose Rotation Angle")
+
+        angle = st.selectbox(
+            "Rotate clockwise by",
+            options=[90, 180, 270],
+            format_func=lambda x: f"{x}° clockwise",
+            key="rotate_angle"
+        )
+
+        st.caption("90° = landscape ↔ portrait | 180° = upside down | 270° = opposite landscape")
+
+        st.markdown("---")
+        st.subheader("3️⃣ Download Rotated PDF")
+
+        if pages_to_rotate:
+            original_name = rotate_file.name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            custom_filename = st.text_input(
+                "Enter your preferred file name",
+                value=f"{original_name}_rotated_{angle}",
+                key="rotate_custom_name",
+                help="You don't need to type .pdf – it will be added automatically"
+            )
+
+            custom_filename = custom_filename.strip()
+            if not custom_filename:
+                custom_filename = f"rotated_{angle}"
+            if not custom_filename.lower().endswith(".pdf"):
+                custom_filename += ".pdf"
+
+            try:
+                with st.spinner("Rotating pages..."):
+                    rotated_pdf = rotate_pages(rotate_pdf_bytes, pages_to_rotate, angle)
+
+                st.download_button(
+                    label="📥 Download Rotated PDF",
+                    data=rotated_pdf,
+                    file_name=custom_filename,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_rotated"
+                )
+                st.success(
+                    f"Ready! **{len(pages_to_rotate)}** page(s) rotated by **{angle}°** clockwise"
+                )
+                st.caption(f"File name: **{custom_filename}**")
+                st.caption(f"File size: {len(rotated_pdf) / 1024:.1f} KB")
+            except Exception as e:
+                st.error(f"Error rotating PDF: {e}")
+        else:
+            st.warning("Please select at least one page to rotate.")
 
 st.markdown("---")
 st.caption("💡 Tip: Use Chrome or Edge for the best experience.")
