@@ -5,6 +5,7 @@ import re
 import random
 import string
 import io
+import base64
 
 # ======================
 # Page Config
@@ -41,12 +42,12 @@ def extract_pages(pdf_bytes, selected_pages):
     """Extract selected pages (1-based index) from PDF"""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
-   
+    
     for page_num in selected_pages:
         idx = page_num - 1
         if 0 <= idx < len(reader.pages):
             writer.add_page(reader.pages[idx])
-   
+    
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -60,21 +61,39 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     """
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
-
     selected_set = set(selected_pages)
-
     for i, page in enumerate(reader.pages):
         page_num = i + 1  # 1-based
         if page_num in selected_set:
-            # rotate() returns the page object after rotation
             writer.add_page(page.rotate(angle))
         else:
             writer.add_page(page)
-
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
+def preview_pdf(pdf_bytes: bytes, height: int = 600, key: str = "pdf_preview"):
+    """
+    Display a PDF preview in the browser using a base64-encoded iframe.
+    Works without extra packages.
+    """
+    if not pdf_bytes:
+        st.warning("No PDF data to preview.")
+        return
+
+    base64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+    pdf_display = f'''
+    <iframe
+        src="data:application/pdf;base64,{base64_pdf}"
+        width="100%"
+        height="{height}"
+        type="application/pdf"
+        style="border: 1px solid #ddd; border-radius: 8px;"
+    ></iframe>
+    '''
+    st.markdown(pdf_display, unsafe_allow_html=True)
+    st.caption("📄 PDF Preview (scroll inside the viewer to navigate pages)")
 
 # ======================
 # Session State Init
@@ -108,7 +127,7 @@ if not st.session_state.logged_in:
         with st.sidebar.form("email_form"):
             email = st.text_input("Email address", placeholder="you@example.com")
             send_btn = st.form_submit_button("Send Verification Code", use_container_width=True, type="primary")
-           
+            
             if send_btn:
                 email = email.strip().lower()
                 if not email:
@@ -125,7 +144,7 @@ if not st.session_state.logged_in:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
         st.sidebar.caption("In a real app this code would be sent by email.")
-       
+        
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -133,13 +152,13 @@ if not st.session_state.logged_in:
                 verify_btn = st.form_submit_button("Verify & Login", use_container_width=True, type="primary")
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-           
+            
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-           
+            
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
@@ -196,17 +215,17 @@ with tab1:
 
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
-       
+        
         st.markdown("**Files in merge order:**")
         for i, f in enumerate(uploaded_files, 1):
             st.write(f"{i}. `{f.name}` ({f.size / 1024:.1f} KB)")
 
         st.markdown("---")
-       
+        
         if st.button("🔗 Combine All PDFs", type="primary", use_container_width=True, key="merge_btn"):
             with st.spinner("Merging PDFs..."):
                 writer = merge_pdfs(uploaded_files)
-               
+                
                 if writer is not None:
                     buffer = io.BytesIO()
                     writer.write(buffer)
@@ -219,19 +238,19 @@ with tab1:
     if st.session_state.merged_pdf is not None:
         st.markdown("---")
         st.subheader("Download Combined PDF")
-       
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"combined_{timestamp}.pdf"
-       
+        
         custom_name = st.text_input(
             "Custom file name (optional)",
             value=default_name,
             key="merge_custom_name"
         )
-       
+        
         if not custom_name.lower().endswith(".pdf"):
             custom_name += ".pdf"
-       
+        
         st.download_button(
             label="📥 Download Combined PDF",
             data=st.session_state.merged_pdf,
@@ -241,8 +260,12 @@ with tab1:
             type="primary",
             key="download_merged"
         )
-       
+        
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
+
+        # Preview the merged PDF
+        with st.expander("👁️ Preview Combined PDF", expanded=False):
+            preview_pdf(st.session_state.merged_pdf, height=650, key="merged_preview")
 
 # =====================================================
 # TAB 2: Select Pages & Download
@@ -274,6 +297,10 @@ with tab2:
         st.success(f"✅ Uploaded: **{single_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
 
+        # Preview the uploaded PDF
+        with st.expander("👁️ Preview Uploaded PDF", expanded=False):
+            preview_pdf(pdf_bytes, height=650, key="single_upload_preview")
+
         st.markdown("---")
         st.subheader("1️⃣ Select Pages")
 
@@ -301,7 +328,7 @@ with tab2:
                 start_page = st.number_input("From page", min_value=1, max_value=total_pages, value=1, key="select_start")
             with col2:
                 end_page = st.number_input("To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end")
-           
+            
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
             else:
@@ -329,7 +356,7 @@ with tab2:
             custom_filename = custom_filename.strip()
             if not custom_filename:
                 custom_filename = "selected_pages"
-           
+            
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
 
@@ -346,9 +373,15 @@ with tab2:
                     type="primary",
                     key="download_selected"
                 )
+
                 st.success(f"Ready to download **{len(selected_pages)}** page(s)")
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
+
+                # Preview the extracted / selected pages
+                with st.expander("👁️ Preview Selected Pages", expanded=False):
+                    preview_pdf(extracted_pdf, height=650, key="selected_preview")
+
             except Exception as e:
                 st.error(f"Error preparing PDF: {e}")
         else:
@@ -380,6 +413,10 @@ with tab3:
 
         st.success(f"✅ Uploaded: **{rotate_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
+
+        # Preview the uploaded PDF
+        with st.expander("👁️ Preview Uploaded PDF", expanded=False):
+            preview_pdf(rotate_pdf_bytes, height=650, key="rotate_upload_preview")
 
         st.markdown("---")
         st.subheader("1️⃣ Select Pages to Rotate")
@@ -452,6 +489,7 @@ with tab3:
             custom_filename = custom_filename.strip()
             if not custom_filename:
                 custom_filename = f"rotated_{angle}"
+
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
 
@@ -468,11 +506,17 @@ with tab3:
                     type="primary",
                     key="download_rotated"
                 )
+
                 st.success(
                     f"Ready! **{len(pages_to_rotate)}** page(s) rotated by **{angle}°** clockwise"
                 )
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(rotated_pdf) / 1024:.1f} KB")
+
+                # Preview the rotated PDF
+                with st.expander("👁️ Preview Rotated PDF", expanded=False):
+                    preview_pdf(rotated_pdf, height=650, key="rotated_preview")
+
             except Exception as e:
                 st.error(f"Error rotating PDF: {e}")
         else:
