@@ -41,7 +41,6 @@ def merge_pdfs(uploaded_files):
 
 
 def extract_pages(pdf_bytes, selected_pages):
-    """Extract selected pages (1-based index) from PDF"""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     for page_num in selected_pages:
@@ -55,7 +54,6 @@ def extract_pages(pdf_bytes, selected_pages):
 
 
 def rotate_pages(pdf_bytes, selected_pages, angle):
-    """Rotate selected pages (1-based index) by the given angle (clockwise)."""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     selected_set = set(selected_pages)
@@ -72,7 +70,6 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
 
 
 def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
-    """Return True if the PDF already contains real text."""
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         total_text = ""
@@ -87,7 +84,6 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
 
 
 def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
-    """Convert digital PDF using pdf2docx."""
     from pdf2docx import Converter
     docx_stream = io.BytesIO()
     cv = Converter(stream=pdf_bytes)
@@ -100,7 +96,6 @@ def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
 
 
 def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
-    """Convert scanned PDF to editable Word using OCR (pypdfium2 + Tesseract)."""
     import pypdfium2 as pdfium
     import pytesseract
     from docx import Document
@@ -131,7 +126,6 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
 
 
 def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng") -> bytes:
-    """Smart PDF → Word converter."""
     try:
         from pdf2docx import Converter
     except ImportError:
@@ -141,18 +135,12 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
         try:
             return pdf_to_word_with_ocr(pdf_bytes, lang=ocr_lang)
         except Exception as e:
-            raise RuntimeError(
-                f"OCR conversion failed: {e}\n\n"
-                "Make sure you have installed:\n"
-                "  • tesseract-ocr (system package)\n"
-                "  • pip packages: pypdfium2, pytesseract, python-docx, Pillow"
-            )
+            raise RuntimeError(f"OCR conversion failed: {e}")
     else:
         return pdf_to_word_with_pdf2docx(pdf_bytes)
 
 
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
-    """Simple PDF preview (images only)."""
     if not pdf_bytes:
         st.warning("No PDF data to preview.")
         return
@@ -188,12 +176,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
 
 
 def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int = 20):
-    """
-    Preview PDF pages as images and allow basic editing:
-    - Choose which pages to keep
-    - Rotate selected pages
-    Returns the edited PDF as bytes (or None if no action taken).
-    """
     if not pdf_bytes:
         st.warning("No PDF data to preview/edit.")
         return None
@@ -215,7 +197,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
 
     st.caption(f"📄 Preview & Edit — {n_pages} page(s)")
 
-    # 1. Select pages to keep
     st.markdown("**1. Select pages to keep**")
     page_options = list(range(1, n_pages + 1))
     selected_pages = st.multiselect(
@@ -229,7 +210,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
         st.warning("Please select at least one page.")
         return None
 
-    # 2. Rotation
     st.markdown("**2. Rotate pages (optional)**")
     rotate_choice = st.selectbox(
         "Rotate selected pages by",
@@ -238,7 +218,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
         key=f"{key}_rotate"
     )
 
-    # 3. Preview
     st.markdown("**3. Preview of selected pages**")
     cols = st.columns(2)
 
@@ -260,7 +239,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
     if len(selected_pages) > max_pages:
         st.info(f"Showing first {max_pages} of {len(selected_pages)} selected pages.")
 
-    # 4. Apply edits
     st.markdown("---")
     if st.button("✅ Apply edits & create new PDF", type="primary", key=f"{key}_apply"):
         with st.spinner("Building edited PDF..."):
@@ -347,7 +325,6 @@ if not st.session_state.logged_in:
     else:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
-        st.sidebar.caption("In a real app this code would be sent by email.")
 
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
@@ -420,7 +397,6 @@ with tab1:
         "Choose one or more PDF files",
         type=["pdf"],
         accept_multiple_files=True,
-        help="The order of selection will be the order in the final file.",
         key="multi_uploader"
     )
 
@@ -528,7 +504,6 @@ with tab2:
                 "Choose pages (you can select multiple)",
                 options=page_options,
                 default=[1] if total_pages >= 1 else [],
-                help="Hold Ctrl (or Cmd on Mac) to select multiple pages",
                 key="select_multiselect"
             )
         elif selection_mode == "Select page range":
@@ -561,8 +536,7 @@ with tab2:
             custom_filename = st.text_input(
                 "Enter your preferred file name",
                 value=f"{original_name}_selected",
-                key="single_custom_name",
-                help="You don't need to type .pdf – it will be added automatically"
+                key="single_custom_name"
             )
             custom_filename = custom_filename.strip()
             if not custom_filename:
@@ -651,7 +625,6 @@ with tab3:
                 "Choose pages to rotate",
                 options=page_options,
                 default=[1] if total_pages >= 1 else [],
-                help="Hold Ctrl (or Cmd on Mac) to select multiple pages",
                 key="rotate_multiselect"
             )
         elif rotate_mode == "Select page range":
@@ -682,7 +655,6 @@ with tab3:
             format_func=lambda x: f"{x}° clockwise",
             key="rotate_angle"
         )
-        st.caption("90° = landscape ↔ portrait | 180° = upside down | 270° = opposite landscape")
 
         st.markdown("---")
         st.subheader("3️⃣ Download Rotated PDF")
@@ -695,8 +667,7 @@ with tab3:
             custom_filename = st.text_input(
                 "Enter your preferred file name",
                 value=f"{original_name}_rotated_{angle}",
-                key="rotate_custom_name",
-                help="You don't need to type .pdf – it will be added automatically"
+                key="rotate_custom_name"
             )
             custom_filename = custom_filename.strip()
             if not custom_filename:
@@ -732,7 +703,7 @@ with tab3:
 
 
 # =====================================================
-# TAB 4: PDF to Word (with editable text)
+# TAB 4: PDF to Word
 # =====================================================
 with tab4:
     st.subheader("Convert PDF to Word (.docx)")
@@ -770,15 +741,13 @@ with tab4:
         with col1:
             force_ocr = st.checkbox(
                 "Force OCR (even if text is present)",
-                value=False,
-                help="Useful when the existing text layer is bad quality"
+                value=False
             )
         with col2:
             ocr_lang = st.selectbox(
                 "OCR Language",
                 options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
-                index=0,
-                help="Only used when OCR is performed"
+                index=0
             )
 
         if st.button("📝 Convert / Extract Text", type="primary", use_container_width=True, key="convert_btn"):
@@ -814,7 +783,6 @@ with tab4:
                 except Exception as e:
                     st.error(f"Extraction failed: {e}")
 
-        # Editable text area
         if st.session_state.extracted_text:
             st.markdown("---")
             st.subheader("✏️ Edit the extracted text")
@@ -854,7 +822,6 @@ with tab4:
                 st.session_state.converted_docx = buffer.getvalue()
                 st.success("✅ Word document generated from your edited text!")
 
-        # Download section
         if st.session_state.converted_docx is not None:
             st.markdown("---")
             st.subheader("Download Word File")
@@ -881,10 +848,3 @@ with tab4:
                 key="download_docx"
             )
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
-
-
-st.markdown("---")
-st.caption(
-    "💡 Tip: Make sure you have both `requirements.txt` and `packages.txt` "
-    "(with tesseract-ocr) for full OCR support on Streamlit Cloud."
-)
