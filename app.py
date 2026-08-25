@@ -22,8 +22,10 @@ def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
 
+
 def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
+
 
 def merge_pdfs(uploaded_files):
     writer = PdfWriter()
@@ -36,6 +38,7 @@ def merge_pdfs(uploaded_files):
             st.error(f"Error reading {uploaded_file.name}: {e}")
             return None
     return writer
+
 
 def extract_pages(pdf_bytes, selected_pages):
     """Extract selected pages (1-based index) from PDF"""
@@ -50,6 +53,7 @@ def extract_pages(pdf_bytes, selected_pages):
     buffer.seek(0)
     return buffer.getvalue()
 
+
 def rotate_pages(pdf_bytes, selected_pages, angle):
     """
     Rotate selected pages (1-based index) by the given angle (clockwise).
@@ -59,16 +63,19 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     selected_set = set(selected_pages)
+
     for i, page in enumerate(reader.pages):
         page_num = i + 1  # 1-based
         if page_num in selected_set:
             writer.add_page(page.rotate(angle))
         else:
             writer.add_page(page)
+
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
 
 def pdf_to_word(pdf_bytes: bytes) -> bytes:
     """
@@ -83,17 +90,16 @@ def pdf_to_word(pdf_bytes: bytes) -> bytes:
             "Please install it with: pip install pdf2docx"
         )
 
-    # Write PDF to a temporary in-memory file
     pdf_stream = io.BytesIO(pdf_bytes)
     docx_stream = io.BytesIO()
 
-    # Convert
     cv = Converter(pdf_stream)
     cv.convert(docx_stream)
     cv.close()
 
     docx_stream.seek(0)
     return docx_stream.getvalue()
+
 
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     """
@@ -104,7 +110,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         st.warning("No PDF data to preview.")
         return
 
-    # Check dependencies
     missing = []
     try:
         import pypdfium2 as pdfium
@@ -128,7 +133,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         )
         return
 
-    # Render pages
     try:
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
@@ -159,6 +163,7 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
             key=f"{key}_error"
         )
 
+
 # ======================
 # Session State Init
 # ======================
@@ -183,6 +188,7 @@ if "total_pages" not in st.session_state:
 if "converted_docx" not in st.session_state:
     st.session_state.converted_docx = None
 
+
 # ======================
 # Sidebar - Login
 # ======================
@@ -192,7 +198,9 @@ if not st.session_state.logged_in:
     if not st.session_state.code_sent:
         with st.sidebar.form("email_form"):
             email = st.text_input("Email address", placeholder="you@example.com")
-            send_btn = st.form_submit_button("Send Verification Code", use_container_width=True, type="primary")
+            send_btn = st.form_submit_button(
+                "Send Verification Code", use_container_width=True, type="primary"
+            )
 
             if send_btn:
                 email = email.strip().lower()
@@ -215,7 +223,9 @@ if not st.session_state.logged_in:
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
             with col1:
-                verify_btn = st.form_submit_button("Verify & Login", use_container_width=True, type="primary")
+                verify_btn = st.form_submit_button(
+                    "Verify & Login", use_container_width=True, type="primary"
+                )
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
 
@@ -248,6 +258,7 @@ else:
         st.session_state.converted_docx = None
         st.rerun()
 
+
 # ======================
 # Main App
 # ======================
@@ -265,6 +276,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "🔄 Rotate Pages",
     "📝 PDF to Word"
 ])
+
 
 # =====================================================
 # TAB 1: Combine Multiple PDFs
@@ -328,6 +340,7 @@ with tab1:
         with st.expander("👁️ Preview Combined PDF", expanded=False):
             preview_pdf(st.session_state.merged_pdf, key="merged_preview")
 
+
 # =====================================================
 # TAB 2: Select Pages & Download
 # =====================================================
@@ -384,9 +397,13 @@ with tab2:
         elif selection_mode == "Select page range":
             col1, col2 = st.columns(2)
             with col1:
-                start_page = st.number_input("From page", min_value=1, max_value=total_pages, value=1, key="select_start")
+                start_page = st.number_input(
+                    "From page", min_value=1, max_value=total_pages, value=1, key="select_start"
+                )
             with col2:
-                end_page = st.number_input("To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end")
+                end_page = st.number_input(
+                    "To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end"
+                )
 
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
@@ -440,6 +457,7 @@ with tab2:
                 st.error(f"Error preparing PDF: {e}")
         else:
             st.warning("Please select at least one page.")
+
 
 # =====================================================
 # TAB 3: Rotate Pages
@@ -568,6 +586,7 @@ with tab3:
         else:
             st.warning("Please select at least one page to rotate.")
 
+
 # =====================================================
 # TAB 4: PDF to Word
 # =====================================================
@@ -593,7 +612,6 @@ with tab4:
 
         st.markdown("---")
 
-        # Convert button
         if st.button("📝 Convert to Word", type="primary", use_container_width=True, key="convert_btn"):
             with st.spinner("Converting PDF to Word... This may take a few seconds."):
                 try:
@@ -611,7 +629,6 @@ with tab4:
                         "- Complex layouts with many tables/images may need manual cleanup."
                     )
 
-        # Download section
         if st.session_state.converted_docx is not None:
             st.markdown("---")
             st.subheader("Download Word File")
@@ -639,5 +656,6 @@ with tab4:
             )
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
 
+
 st.markdown("---")
-st.caption("💡 Tip: Install packages with →  `pip install pypdfium2 Pillow pdf2docx`")
+st.caption("💡 Tip: Make sure `requirements.txt` contains: streamlit, pypdf, pdf2docx, pypdfium2, Pillow")
