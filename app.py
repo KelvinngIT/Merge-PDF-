@@ -41,12 +41,10 @@ def extract_pages(pdf_bytes, selected_pages):
     """Extract selected pages (1-based index) from PDF"""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
-
     for page_num in selected_pages:
         idx = page_num - 1
         if 0 <= idx < len(reader.pages):
             writer.add_page(reader.pages[idx])
-
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -61,18 +59,41 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     selected_set = set(selected_pages)
-
     for i, page in enumerate(reader.pages):
         page_num = i + 1  # 1-based
         if page_num in selected_set:
             writer.add_page(page.rotate(angle))
         else:
             writer.add_page(page)
-
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
+def pdf_to_word(pdf_bytes: bytes) -> bytes:
+    """
+    Convert PDF bytes to Word (.docx) bytes using pdf2docx.
+    Returns the .docx file as bytes.
+    """
+    try:
+        from pdf2docx import Converter
+    except ImportError:
+        raise ImportError(
+            "Missing package: pdf2docx\n"
+            "Please install it with: pip install pdf2docx"
+        )
+
+    # Write PDF to a temporary in-memory file
+    pdf_stream = io.BytesIO(pdf_bytes)
+    docx_stream = io.BytesIO()
+
+    # Convert
+    cv = Converter(pdf_stream)
+    cv.convert(docx_stream)
+    cv.close()
+
+    docx_stream.seek(0)
+    return docx_stream.getvalue()
 
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     """
@@ -89,7 +110,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         import pypdfium2 as pdfium
     except ImportError:
         missing.append("pypdfium2")
-
     try:
         from PIL import Image  # noqa: F401
     except ImportError:
@@ -112,14 +132,12 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     try:
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
-
         st.caption(f"📄 Preview — showing {min(n_pages, max_pages)} of {n_pages} page(s)")
 
         for i in range(min(n_pages, max_pages)):
             page = pdf[i]
             bitmap = page.render(scale=1.5)
             pil_image = bitmap.to_pil()
-
             st.image(
                 pil_image,
                 caption=f"Page {i + 1}",
@@ -131,7 +149,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
                 f"Only the first {max_pages} pages are shown for performance. "
                 "Download the file to view all pages."
             )
-
     except Exception as e:
         st.error(f"Could not render PDF preview: {e}")
         st.download_button(
@@ -163,6 +180,8 @@ if "single_pdf_name" not in st.session_state:
     st.session_state.single_pdf_name = None
 if "total_pages" not in st.session_state:
     st.session_state.total_pages = 0
+if "converted_docx" not in st.session_state:
+    st.session_state.converted_docx = None
 
 # ======================
 # Sidebar - Login
@@ -226,6 +245,7 @@ else:
         st.session_state.single_pdf_bytes = None
         st.session_state.single_pdf_name = None
         st.session_state.total_pages = 0
+        st.session_state.converted_docx = None
         st.rerun()
 
 # ======================
@@ -239,10 +259,11 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "🔗 Combine Multiple PDFs",
     "📄 Select Pages & Download",
-    "🔄 Rotate Pages"
+    "🔄 Rotate Pages",
+    "📝 PDF to Word"
 ])
 
 # =====================================================
@@ -262,17 +283,14 @@ with tab1:
 
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
-
         st.markdown("**Files in merge order:**")
         for i, f in enumerate(uploaded_files, 1):
             st.write(f"{i}. `{f.name}` ({f.size / 1024:.1f} KB)")
 
         st.markdown("---")
-
         if st.button("🔗 Combine All PDFs", type="primary", use_container_width=True, key="merge_btn"):
             with st.spinner("Merging PDFs..."):
                 writer = merge_pdfs(uploaded_files)
-
                 if writer is not None:
                     buffer = io.BytesIO()
                     writer.write(buffer)
@@ -285,7 +303,6 @@ with tab1:
     if st.session_state.merged_pdf is not None:
         st.markdown("---")
         st.subheader("Download Combined PDF")
-
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"combined_{timestamp}.pdf"
 
@@ -294,7 +311,6 @@ with tab1:
             value=default_name,
             key="merge_custom_name"
         )
-
         if not custom_name.lower().endswith(".pdf"):
             custom_name += ".pdf"
 
@@ -307,7 +323,6 @@ with tab1:
             type="primary",
             key="download_merged"
         )
-
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
 
         with st.expander("👁️ Preview Combined PDF", expanded=False):
@@ -357,7 +372,6 @@ with tab2:
         )
 
         selected_pages = []
-
         if selection_mode == "Select specific pages":
             page_options = list(range(1, total_pages + 1))
             selected_pages = st.multiselect(
@@ -397,11 +411,9 @@ with tab2:
                 key="single_custom_name",
                 help="You don't need to type .pdf – it will be added automatically"
             )
-
             custom_filename = custom_filename.strip()
             if not custom_filename:
                 custom_filename = "selected_pages"
-
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
 
@@ -418,14 +430,12 @@ with tab2:
                     type="primary",
                     key="download_selected"
                 )
-
                 st.success(f"Ready to download **{len(selected_pages)}** page(s)")
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
 
                 with st.expander("👁️ Preview Selected Pages", expanded=False):
                     preview_pdf(extracted_pdf, key="selected_preview")
-
             except Exception as e:
                 st.error(f"Error preparing PDF: {e}")
         else:
@@ -472,7 +482,6 @@ with tab3:
         )
 
         pages_to_rotate = []
-
         if rotate_mode == "Select specific pages":
             page_options = list(range(1, total_pages + 1))
             pages_to_rotate = st.multiselect(
@@ -511,7 +520,6 @@ with tab3:
             format_func=lambda x: f"{x}° clockwise",
             key="rotate_angle"
         )
-
         st.caption("90° = landscape ↔ portrait | 180° = upside down | 270° = opposite landscape")
 
         st.markdown("---")
@@ -528,11 +536,9 @@ with tab3:
                 key="rotate_custom_name",
                 help="You don't need to type .pdf – it will be added automatically"
             )
-
             custom_filename = custom_filename.strip()
             if not custom_filename:
                 custom_filename = f"rotated_{angle}"
-
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
 
@@ -549,7 +555,6 @@ with tab3:
                     type="primary",
                     key="download_rotated"
                 )
-
                 st.success(
                     f"Ready! **{len(pages_to_rotate)}** page(s) rotated by **{angle}°** clockwise"
                 )
@@ -558,11 +563,81 @@ with tab3:
 
                 with st.expander("👁️ Preview Rotated PDF", expanded=False):
                     preview_pdf(rotated_pdf, key="rotated_preview")
-
             except Exception as e:
                 st.error(f"Error rotating PDF: {e}")
         else:
             st.warning("Please select at least one page to rotate.")
 
+# =====================================================
+# TAB 4: PDF to Word
+# =====================================================
+with tab4:
+    st.subheader("Convert PDF to Word (.docx)")
+    st.markdown("Upload a PDF → Convert it to an editable Word document → Download")
+
+    pdf_to_word_file = st.file_uploader(
+        "Upload a PDF file to convert",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="pdf2word_uploader"
+    )
+
+    if pdf_to_word_file is not None:
+        pdf_bytes = pdf_to_word_file.read()
+
+        st.success(f"✅ Uploaded: **{pdf_to_word_file.name}**")
+        st.caption(f"File size: {len(pdf_bytes) / 1024:.1f} KB")
+
+        with st.expander("👁️ Preview PDF", expanded=False):
+            preview_pdf(pdf_bytes, key="pdf2word_preview")
+
+        st.markdown("---")
+
+        # Convert button
+        if st.button("📝 Convert to Word", type="primary", use_container_width=True, key="convert_btn"):
+            with st.spinner("Converting PDF to Word... This may take a few seconds."):
+                try:
+                    docx_bytes = pdf_to_word(pdf_bytes)
+                    st.session_state.converted_docx = docx_bytes
+                    st.success("✅ Conversion completed successfully!")
+                except ImportError as e:
+                    st.error(str(e))
+                    st.code("pip install pdf2docx", language="bash")
+                except Exception as e:
+                    st.error(f"Conversion failed: {e}")
+                    st.info(
+                        "Tips:\n"
+                        "- Scanned PDFs (image-only) usually convert poorly.\n"
+                        "- Complex layouts with many tables/images may need manual cleanup."
+                    )
+
+        # Download section
+        if st.session_state.converted_docx is not None:
+            st.markdown("---")
+            st.subheader("Download Word File")
+
+            original_name = pdf_to_word_file.name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            custom_name = st.text_input(
+                "Custom file name (optional)",
+                value=f"{original_name}.docx",
+                key="docx_custom_name"
+            )
+            if not custom_name.lower().endswith(".docx"):
+                custom_name += ".docx"
+
+            st.download_button(
+                label="📥 Download Word Document",
+                data=st.session_state.converted_docx,
+                file_name=custom_name,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                type="primary",
+                key="download_docx"
+            )
+            st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
+
 st.markdown("---")
-st.caption("💡 Tip: Install packages with →  pip install pypdfium2 Pillow")
+st.caption("💡 Tip: Install packages with →  `pip install pypdfium2 Pillow pdf2docx`")
