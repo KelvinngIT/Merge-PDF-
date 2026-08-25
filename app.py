@@ -63,14 +63,12 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     selected_set = set(selected_pages)
-
     for i, page in enumerate(reader.pages):
         page_num = i + 1  # 1-based
         if page_num in selected_set:
             writer.add_page(page.rotate(angle))
         else:
             writer.add_page(page)
-
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -90,12 +88,14 @@ def pdf_to_word(pdf_bytes: bytes) -> bytes:
             "Please install it with: pip install pdf2docx"
         )
 
-    pdf_stream = io.BytesIO(pdf_bytes)
     docx_stream = io.BytesIO()
 
-    cv = Converter(pdf_stream)
-    cv.convert(docx_stream)
-    cv.close()
+    # Correct usage: pass raw bytes via stream=
+    cv = Converter(stream=pdf_bytes)
+    try:
+        cv.convert(docx_stream)
+    finally:
+        cv.close()
 
     docx_stream.seek(0)
     return docx_stream.getvalue()
@@ -137,7 +137,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
         st.caption(f"📄 Preview — showing {min(n_pages, max_pages)} of {n_pages} page(s)")
-
         for i in range(min(n_pages, max_pages)):
             page = pdf[i]
             bitmap = page.render(scale=1.5)
@@ -147,7 +146,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
                 caption=f"Page {i + 1}",
                 use_container_width=True
             )
-
         if n_pages > max_pages:
             st.info(
                 f"Only the first {max_pages} pages are shown for performance. "
@@ -201,7 +199,6 @@ if not st.session_state.logged_in:
             send_btn = st.form_submit_button(
                 "Send Verification Code", use_container_width=True, type="primary"
             )
-
             if send_btn:
                 email = email.strip().lower()
                 if not email:
@@ -317,7 +314,6 @@ with tab1:
         st.subheader("Download Combined PDF")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"combined_{timestamp}.pdf"
-
         custom_name = st.text_input(
             "Custom file name (optional)",
             value=default_name,
@@ -404,7 +400,6 @@ with tab2:
                 end_page = st.number_input(
                     "To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end"
                 )
-
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
             else:
@@ -519,7 +514,6 @@ with tab3:
                 end_page = st.number_input(
                     "To page", min_value=1, max_value=total_pages, value=total_pages, key="rotate_end"
                 )
-
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
             else:
@@ -603,7 +597,6 @@ with tab4:
 
     if pdf_to_word_file is not None:
         pdf_bytes = pdf_to_word_file.read()
-
         st.success(f"✅ Uploaded: **{pdf_to_word_file.name}**")
         st.caption(f"File size: {len(pdf_bytes) / 1024:.1f} KB")
 
