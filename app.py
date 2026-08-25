@@ -371,8 +371,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("💖 Support the Writer")
 st.sidebar.markdown("If this tool helped you, consider buying me a coffee!")
 
-# ← Change this URL to your real payment link
-SUPPORT_URL = "https://buymeacoffee.com/yourusername"
+SUPPORT_URL = "https://buymeacoffee.com/itmasterngw"
 
 st.sidebar.link_button(
     "☕ Buy Me a Coffee",
