@@ -299,7 +299,7 @@ if "extracted_text" not in st.session_state:
 
 
 # ======================
-# Sidebar - Login
+# Sidebar - Login + Support
 # ======================
 st.sidebar.header("🔐 Login with Email")
 
@@ -365,6 +365,21 @@ else:
         st.session_state.converted_docx = None
         st.session_state.extracted_text = None
         st.rerun()
+
+# Support the Writer
+st.sidebar.markdown("---")
+st.sidebar.subheader("💖 Support the Writer")
+st.sidebar.markdown("If this tool helped you, consider buying me a coffee!")
+
+# ← Change this URL to your real payment link
+SUPPORT_URL = "https://buymeacoffee.com/yourusername"
+
+st.sidebar.link_button(
+    "☕ Buy Me a Coffee",
+    SUPPORT_URL,
+    use_container_width=True,
+    type="primary"
+)
 
 
 # ======================
