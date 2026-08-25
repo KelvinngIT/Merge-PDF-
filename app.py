@@ -5,8 +5,6 @@ import re
 import random
 import string
 import io
-import tempfile
-import os
 
 # ======================
 # Page Config
@@ -66,7 +64,7 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     writer = PdfWriter()
     selected_set = set(selected_pages)
     for i, page in enumerate(reader.pages):
-        page_num = i + 1  # 1-based
+        page_num = i + 1
         if page_num in selected_set:
             writer.add_page(page.rotate(angle))
         else:
@@ -82,7 +80,7 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         total_text = ""
-        for page in reader.pages[:5]:  # check first few pages only
+        for page in reader.pages[:5]:
             text = page.extract_text() or ""
             total_text += text
             if len(total_text.strip()) >= min_chars:
@@ -93,24 +91,15 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
 
 
 def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
-    """Convert digital PDF (with text layer) using pdf2docx – keeps layout."""
+    """Convert digital PDF (with text layer) using pdf2docx."""
     from pdf2docx import Converter
 
     docx_stream = io.BytesIO()
     cv = Converter(stream=pdf_bytes)
     try:
-        # Better settings for text extraction
-        cv.convert(
-            docx_stream,
-            start=0,
-            end=None,
-            # These help reduce image embedding when text is present
-            parse_lattice_table=True,
-            parse_stream_table=True,
-        )
+        cv.convert(docx_stream)
     finally:
         cv.close()
-
     docx_stream.seek(0)
     return docx_stream.getvalue()
 
@@ -125,7 +114,6 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     from docx import Document
     from docx.shared import Pt
 
-    # Convert PDF pages → images
     images = convert_from_bytes(pdf_bytes, dpi=300)
 
     doc = Document()
@@ -135,17 +123,14 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     font.size = Pt(11)
 
     for i, img in enumerate(images):
-        # OCR each page
         text = pytesseract.image_to_string(img, lang=lang)
 
         if i > 0:
             doc.add_page_break()
 
-        # Add page marker (optional – remove if you don't want it)
         doc.add_paragraph(f"--- Page {i + 1} ---")
         doc.add_paragraph(text.strip() if text.strip() else "[No text detected on this page]")
 
-    # Save to bytes
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -155,12 +140,11 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
 def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng") -> bytes:
     """
     Smart PDF → Word converter.
-    - If the PDF already has text → use pdf2docx (best layout)
-    - If it is scanned / image-only → use OCR (real editable text)
-    - force_ocr=True forces the OCR path
+    - Digital PDF → pdf2docx (keeps layout)
+    - Scanned PDF → OCR (real editable text)
     """
     try:
-        from pdf2docx import Converter  # just to check import
+        from pdf2docx import Converter
     except ImportError:
         raise ImportError(
             "Missing package: pdf2docx\n"
@@ -168,7 +152,6 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
         )
 
     if force_ocr or not has_extractable_text(pdf_bytes):
-        # Scanned PDF → OCR path
         try:
             return pdf_to_word_with_ocr(pdf_bytes, lang=ocr_lang)
         except Exception as e:
@@ -180,15 +163,11 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
                 "  • pip packages: pdf2image, pytesseract, python-docx"
             )
     else:
-        # Digital PDF with text layer → pdf2docx
         return pdf_to_word_with_pdf2docx(pdf_bytes)
 
 
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
-    """
-    Reliable PDF preview that works in Chrome / Edge / Firefox.
-    Renders pages as images using pypdfium2 + Pillow.
-    """
+    """Reliable PDF preview using pypdfium2 + Pillow."""
     if not pdf_bytes:
         st.warning("No PDF data to preview.")
         return
@@ -578,6 +557,7 @@ with tab3:
         )
 
         pages_to_rotate = []
+
         if rotate_mode == "Select specific pages":
             page_options = list(range(1, total_pages + 1))
             pages_to_rotate = st.multiselect(
@@ -585,3 +565,197 @@ with tab3:
                 options=page_options,
                 default=[1] if total_pages >= 1 else [],
                 help="Hold Ctrl (or Cmd on Mac) to select multiple pages",
+                key="rotate_multiselect"
+            )
+        elif rotate_mode == "Select page range":
+            col1, col2 = st.columns(2)
+            with col1:
+                start_page = st.number_input(
+                    "From page",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=1,
+                    key="rotate_start"
+                )
+            with col2:
+                end_page = st.number_input(
+                    "To page",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=total_pages,
+                    key="rotate_end"
+                )
+            if start_page > end_page:
+                st.warning("Start page cannot be greater than end page.")
+            else:
+                pages_to_rotate = list(range(start_page, end_page + 1))
+                st.write(f"Pages to rotate: **{start_page} to {end_page}** ({len(pages_to_rotate)} pages)")
+        else:
+            pages_to_rotate = list(range(1, total_pages + 1))
+            st.write(f"All **{total_pages}** pages will be rotated.")
+
+        st.markdown("---")
+        st.subheader("2️⃣ Choose Rotation Angle")
+
+        angle = st.selectbox(
+            "Rotate clockwise by",
+            options=[90, 180, 270],
+            format_func=lambda x: f"{x}° clockwise",
+            key="rotate_angle"
+        )
+        st.caption("90° = landscape ↔ portrait | 180° = upside down | 270° = opposite landscape")
+
+        st.markdown("---")
+        st.subheader("3️⃣ Download Rotated PDF")
+
+        if pages_to_rotate:
+            original_name = rotate_file.name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            custom_filename = st.text_input(
+                "Enter your preferred file name",
+                value=f"{original_name}_rotated_{angle}",
+                key="rotate_custom_name",
+                help="You don't need to type .pdf – it will be added automatically"
+            )
+            custom_filename = custom_filename.strip()
+            if not custom_filename:
+                custom_filename = f"rotated_{angle}"
+            if not custom_filename.lower().endswith(".pdf"):
+                custom_filename += ".pdf"
+
+            try:
+                with st.spinner("Rotating pages..."):
+                    rotated_pdf = rotate_pages(rotate_pdf_bytes, pages_to_rotate, angle)
+
+                st.download_button(
+                    label="📥 Download Rotated PDF",
+                    data=rotated_pdf,
+                    file_name=custom_filename,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_rotated"
+                )
+                st.success(
+                    f"Ready! **{len(pages_to_rotate)}** page(s) rotated by **{angle}°** clockwise"
+                )
+                st.caption(f"File name: **{custom_filename}**")
+                st.caption(f"File size: {len(rotated_pdf) / 1024:.1f} KB")
+
+                with st.expander("👁️ Preview Rotated PDF", expanded=False):
+                    preview_pdf(rotated_pdf, key="rotated_preview")
+            except Exception as e:
+                st.error(f"Error rotating PDF: {e}")
+        else:
+            st.warning("Please select at least one page to rotate.")
+
+
+# =====================================================
+# TAB 4: PDF to Word
+# =====================================================
+with tab4:
+    st.subheader("Convert PDF to Word (.docx)")
+    st.markdown(
+        "Upload a PDF → Convert it to an **editable Word document with real text** → Download"
+    )
+
+    pdf_to_word_file = st.file_uploader(
+        "Upload a PDF file to convert",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="pdf2word_uploader"
+    )
+
+    if pdf_to_word_file is not None:
+        pdf_bytes = pdf_to_word_file.read()
+        st.success(f"✅ Uploaded: **{pdf_to_word_file.name}**")
+        st.caption(f"File size: {len(pdf_bytes) / 1024:.1f} KB")
+
+        is_scanned = not has_extractable_text(pdf_bytes)
+        if is_scanned:
+            st.warning(
+                "⚠️ This looks like a **scanned / image-only PDF**. "
+                "OCR will be used to extract real editable text."
+            )
+        else:
+            st.info("✅ This PDF already contains selectable text. Layout will be preserved.")
+
+        with st.expander("👁️ Preview PDF", expanded=False):
+            preview_pdf(pdf_bytes, key="pdf2word_preview")
+
+        st.markdown("---")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            force_ocr = st.checkbox(
+                "Force OCR (even if text is present)",
+                value=False,
+                help="Useful when the existing text layer is bad quality"
+            )
+        with col2:
+            ocr_lang = st.selectbox(
+                "OCR Language",
+                options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
+                index=0,
+                help="Only used when OCR is performed"
+            )
+
+        if st.button("📝 Convert to Word", type="primary", use_container_width=True, key="convert_btn"):
+            with st.spinner(
+                "Converting PDF to Word... "
+                + ("(using OCR – this may take longer)" if (force_ocr or is_scanned) else "")
+            ):
+                try:
+                    docx_bytes = pdf_to_word(
+                        pdf_bytes,
+                        force_ocr=force_ocr,
+                        ocr_lang=ocr_lang
+                    )
+                    st.session_state.converted_docx = docx_bytes
+                    st.success("✅ Conversion completed! The Word file now contains **real editable text**.")
+                except ImportError as e:
+                    st.error(str(e))
+                    st.code("pip install pdf2docx pdf2image pytesseract python-docx", language="bash")
+                except Exception as e:
+                    st.error(f"Conversion failed: {e}")
+                    st.info(
+                        "Tips:\n"
+                        "- For scanned PDFs you need **Tesseract** and **Poppler** installed.\n"
+                        "- Complex layouts may still need some manual cleanup."
+                    )
+
+        if st.session_state.converted_docx is not None:
+            st.markdown("---")
+            st.subheader("Download Word File")
+
+            original_name = pdf_to_word_file.name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            custom_name = st.text_input(
+                "Custom file name (optional)",
+                value=f"{original_name}.docx",
+                key="docx_custom_name"
+            )
+            if not custom_name.lower().endswith(".docx"):
+                custom_name += ".docx"
+
+            st.download_button(
+                label="📥 Download Word Document",
+                data=st.session_state.converted_docx,
+                file_name=custom_name,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                type="primary",
+                key="download_docx"
+            )
+            st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
+
+
+st.markdown("---")
+st.caption(
+    "💡 Tip: Install system packages `tesseract-ocr` + `poppler-utils` "
+    "and the Python packages listed in requirements.txt for full OCR support."
+)
