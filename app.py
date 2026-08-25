@@ -107,14 +107,14 @@ def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
 def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     """
     Convert scanned / image-only PDF to editable Word using OCR.
-    Requires: tesseract + poppler installed on the system.
+    Uses pypdfium2 (no poppler needed) + Tesseract.
     """
-    from pdf2image import convert_from_bytes
+    import pypdfium2 as pdfium
     import pytesseract
     from docx import Document
     from docx.shared import Pt
 
-    images = convert_from_bytes(pdf_bytes, dpi=300)
+    pdf = pdfium.PdfDocument(pdf_bytes)
 
     doc = Document()
     style = doc.styles["Normal"]
@@ -122,8 +122,15 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     font.name = "Arial"
     font.size = Pt(11)
 
-    for i, img in enumerate(images):
-        text = pytesseract.image_to_string(img, lang=lang)
+    for i in range(len(pdf)):
+        page = pdf[i]
+
+        # Render page to high-quality image
+        bitmap = page.render(scale=2.0)  # higher scale = better OCR
+        pil_image = bitmap.to_pil()
+
+        # OCR
+        text = pytesseract.image_to_string(pil_image, lang=lang)
 
         if i > 0:
             doc.add_page_break()
@@ -158,9 +165,8 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
             raise RuntimeError(
                 f"OCR conversion failed: {e}\n\n"
                 "Make sure you have installed:\n"
-                "  • tesseract-ocr  (system package)\n"
-                "  • poppler-utils  (system package)\n"
-                "  • pip packages: pdf2image, pytesseract, python-docx"
+                "  • tesseract-ocr (system package)\n"
+                "  • pip packages: pypdfium2, pytesseract, python-docx, Pillow"
             )
     else:
         return pdf_to_word_with_pdf2docx(pdf_bytes)
@@ -717,12 +723,12 @@ with tab4:
                     st.success("✅ Conversion completed! The Word file now contains **real editable text**.")
                 except ImportError as e:
                     st.error(str(e))
-                    st.code("pip install pdf2docx pdf2image pytesseract python-docx", language="bash")
+                    st.code("pip install pdf2docx pypdfium2 pytesseract python-docx Pillow", language="bash")
                 except Exception as e:
                     st.error(f"Conversion failed: {e}")
                     st.info(
                         "Tips:\n"
-                        "- For scanned PDFs you need **Tesseract** and **Poppler** installed.\n"
+                        "- For scanned PDFs you need **tesseract-ocr** installed (see packages.txt).\n"
                         "- Complex layouts may still need some manual cleanup."
                     )
 
@@ -756,6 +762,6 @@ with tab4:
 
 st.markdown("---")
 st.caption(
-    "💡 Tip: Install system packages `tesseract-ocr` + `poppler-utils` "
-    "and the Python packages listed in requirements.txt for full OCR support."
+    "💡 Tip: Make sure you have both `requirements.txt` and `packages.txt` "
+    "(with tesseract-ocr) for full OCR support on Streamlit Cloud."
 )
