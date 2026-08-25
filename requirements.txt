@@ -3,3 +3,6 @@ pypdf
 pdf2docx
 pypdfium2
 Pillow
+pdf2image
+pytesseract
+python-docx
