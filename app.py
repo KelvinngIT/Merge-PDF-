@@ -55,11 +55,7 @@ def extract_pages(pdf_bytes, selected_pages):
 
 
 def rotate_pages(pdf_bytes, selected_pages, angle):
-    """
-    Rotate selected pages (1-based index) by the given angle (clockwise).
-    Angle must be a multiple of 90 (typically 90, 180, 270).
-    Non-selected pages are kept as-is.
-    """
+    """Rotate selected pages (1-based index) by the given angle (clockwise)."""
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     selected_set = set(selected_pages)
@@ -76,7 +72,7 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
 
 
 def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
-    """Return True if the PDF already contains real text (not just images)."""
+    """Return True if the PDF already contains real text."""
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         total_text = ""
@@ -91,9 +87,8 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
 
 
 def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
-    """Convert digital PDF (with text layer) using pdf2docx."""
+    """Convert digital PDF using pdf2docx."""
     from pdf2docx import Converter
-
     docx_stream = io.BytesIO()
     cv = Converter(stream=pdf_bytes)
     try:
@@ -105,17 +100,13 @@ def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
 
 
 def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
-    """
-    Convert scanned / image-only PDF to editable Word using OCR.
-    Uses pypdfium2 (no poppler needed) + Tesseract.
-    """
+    """Convert scanned PDF to editable Word using OCR (pypdfium2 + Tesseract)."""
     import pypdfium2 as pdfium
     import pytesseract
     from docx import Document
     from docx.shared import Pt
 
     pdf = pdfium.PdfDocument(pdf_bytes)
-
     doc = Document()
     style = doc.styles["Normal"]
     font = style.font
@@ -124,17 +115,12 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
 
     for i in range(len(pdf)):
         page = pdf[i]
-
-        # Render page to high-quality image
-        bitmap = page.render(scale=2.0)  # higher scale = better OCR
+        bitmap = page.render(scale=2.0)
         pil_image = bitmap.to_pil()
-
-        # OCR
         text = pytesseract.image_to_string(pil_image, lang=lang)
 
         if i > 0:
             doc.add_page_break()
-
         doc.add_paragraph(f"--- Page {i + 1} ---")
         doc.add_paragraph(text.strip() if text.strip() else "[No text detected on this page]")
 
@@ -145,18 +131,11 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
 
 
 def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng") -> bytes:
-    """
-    Smart PDF → Word converter.
-    - Digital PDF → pdf2docx (keeps layout)
-    - Scanned PDF → OCR (real editable text)
-    """
+    """Smart PDF → Word converter."""
     try:
         from pdf2docx import Converter
     except ImportError:
-        raise ImportError(
-            "Missing package: pdf2docx\n"
-            "Please install it with: pip install pdf2docx"
-        )
+        raise ImportError("Missing package: pdf2docx\nPlease install it with: pip install pdf2docx")
 
     if force_ocr or not has_extractable_text(pdf_bytes):
         try:
@@ -173,7 +152,7 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
 
 
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
-    """Reliable PDF preview using pypdfium2 + Pillow."""
+    """Simple PDF preview (images only)."""
     if not pdf_bytes:
         st.warning("No PDF data to preview.")
         return
@@ -191,14 +170,6 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     if missing:
         st.error(f"❌ Missing package(s): {', '.join(missing)}")
         st.code(f"pip install {' '.join(missing)}", language="bash")
-        st.info("After installing, restart the Streamlit app completely.")
-        st.download_button(
-            "📥 Download PDF to view instead",
-            data=pdf_bytes,
-            file_name="preview.pdf",
-            mime="application/pdf",
-            key=f"{key}_fallback"
-        )
         return
 
     try:
@@ -209,25 +180,117 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
             page = pdf[i]
             bitmap = page.render(scale=1.5)
             pil_image = bitmap.to_pil()
-            st.image(
-                pil_image,
-                caption=f"Page {i + 1}",
-                use_container_width=True
-            )
+            st.image(pil_image, caption=f"Page {i + 1}", use_container_width=True)
         if n_pages > max_pages:
-            st.info(
-                f"Only the first {max_pages} pages are shown for performance. "
-                "Download the file to view all pages."
-            )
+            st.info(f"Only the first {max_pages} pages are shown for performance.")
     except Exception as e:
         st.error(f"Could not render PDF preview: {e}")
-        st.download_button(
-            "📥 Download PDF to view",
-            data=pdf_bytes,
-            file_name="preview.pdf",
-            mime="application/pdf",
-            key=f"{key}_error"
-        )
+
+
+def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int = 20):
+    """
+    Preview PDF pages as images and allow basic editing:
+    - Choose which pages to keep
+    - Rotate selected pages
+    Returns the edited PDF as bytes (or None if no action taken).
+    """
+    if not pdf_bytes:
+        st.warning("No PDF data to preview/edit.")
+        return None
+
+    try:
+        import pypdfium2 as pdfium
+        from PIL import Image
+    except ImportError as e:
+        st.error(f"Missing package: {e}")
+        st.code("pip install pypdfium2 Pillow")
+        return None
+
+    try:
+        pdf = pdfium.PdfDocument(pdf_bytes)
+        n_pages = len(pdf)
+    except Exception as e:
+        st.error(f"Cannot open PDF: {e}")
+        return None
+
+    st.caption(f"📄 Preview & Edit — {n_pages} page(s)")
+
+    # 1. Select pages to keep
+    st.markdown("**1. Select pages to keep**")
+    page_options = list(range(1, n_pages + 1))
+    selected_pages = st.multiselect(
+        "Pages to include in the final PDF (order will be preserved)",
+        options=page_options,
+        default=page_options,
+        key=f"{key}_select_pages"
+    )
+
+    if not selected_pages:
+        st.warning("Please select at least one page.")
+        return None
+
+    # 2. Rotation
+    st.markdown("**2. Rotate pages (optional)**")
+    rotate_choice = st.selectbox(
+        "Rotate selected pages by",
+        options=[0, 90, 180, 270],
+        format_func=lambda x: "No rotation" if x == 0 else f"{x}° clockwise",
+        key=f"{key}_rotate"
+    )
+
+    # 3. Preview
+    st.markdown("**3. Preview of selected pages**")
+    cols = st.columns(2)
+
+    for idx, page_num in enumerate(selected_pages[:max_pages]):
+        page = pdf[page_num - 1]
+        bitmap = page.render(scale=1.3)
+        pil_image = bitmap.to_pil()
+
+        if rotate_choice != 0:
+            pil_image = pil_image.rotate(-rotate_choice, expand=True)
+
+        with cols[idx % 2]:
+            st.image(
+                pil_image,
+                caption=f"Page {page_num}" + (f" (rotated {rotate_choice}°)" if rotate_choice else ""),
+                use_container_width=True
+            )
+
+    if len(selected_pages) > max_pages:
+        st.info(f"Showing first {max_pages} of {len(selected_pages)} selected pages.")
+
+    # 4. Apply edits
+    st.markdown("---")
+    if st.button("✅ Apply edits & create new PDF", type="primary", key=f"{key}_apply"):
+        with st.spinner("Building edited PDF..."):
+            try:
+                reader = PdfReader(io.BytesIO(pdf_bytes))
+                writer = PdfWriter()
+
+                for page_num in selected_pages:
+                    page = reader.pages[page_num - 1]
+                    if rotate_choice != 0:
+                        page = page.rotate(rotate_choice)
+                    writer.add_page(page)
+
+                buffer = io.BytesIO()
+                writer.write(buffer)
+                buffer.seek(0)
+                edited_bytes = buffer.getvalue()
+
+                st.success(
+                    f"✅ Edited PDF created! "
+                    f"{len(selected_pages)} page(s)"
+                    + (f", rotated {rotate_choice}°" if rotate_choice else "")
+                )
+                return edited_bytes
+
+            except Exception as e:
+                st.error(f"Failed to create edited PDF: {e}")
+                return None
+
+    return None
 
 
 # ======================
@@ -253,6 +316,8 @@ if "total_pages" not in st.session_state:
     st.session_state.total_pages = 0
 if "converted_docx" not in st.session_state:
     st.session_state.converted_docx = None
+if "extracted_text" not in st.session_state:
+    st.session_state.extracted_text = None
 
 
 # ======================
@@ -321,6 +386,7 @@ else:
         st.session_state.single_pdf_name = None
         st.session_state.total_pages = 0
         st.session_state.converted_docx = None
+        st.session_state.extracted_text = None
         st.rerun()
 
 
@@ -401,8 +467,11 @@ with tab1:
         )
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
 
-        with st.expander("👁️ Preview Combined PDF", expanded=False):
-            preview_pdf(st.session_state.merged_pdf, key="merged_preview")
+        with st.expander("👁️ Preview & Edit Combined PDF", expanded=False):
+            edited = preview_and_edit_pdf(st.session_state.merged_pdf, key="merged_edit")
+            if edited is not None:
+                st.session_state.merged_pdf = edited
+                st.rerun()
 
 
 # =====================================================
@@ -435,8 +504,12 @@ with tab2:
         st.success(f"✅ Uploaded: **{single_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
 
-        with st.expander("👁️ Preview Uploaded PDF", expanded=False):
-            preview_pdf(pdf_bytes, key="single_upload_preview")
+        with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
+            edited = preview_and_edit_pdf(pdf_bytes, key="single_edit")
+            if edited is not None:
+                st.session_state.single_pdf_bytes = edited
+                st.session_state.total_pages = len(PdfReader(io.BytesIO(edited)).pages)
+                st.rerun()
 
         st.markdown("---")
         st.subheader("1️⃣ Select Pages")
@@ -549,8 +622,16 @@ with tab3:
         st.success(f"✅ Uploaded: **{rotate_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
 
-        with st.expander("👁️ Preview Uploaded PDF", expanded=False):
-            preview_pdf(rotate_pdf_bytes, key="rotate_upload_preview")
+        with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
+            edited = preview_and_edit_pdf(rotate_pdf_bytes, key="rotate_edit")
+            if edited is not None:
+                st.download_button(
+                    "📥 Download Edited PDF",
+                    data=edited,
+                    file_name="edited.pdf",
+                    mime="application/pdf",
+                    key="download_edited_rotate"
+                )
 
         st.markdown("---")
         st.subheader("1️⃣ Select Pages to Rotate")
@@ -577,19 +658,11 @@ with tab3:
             col1, col2 = st.columns(2)
             with col1:
                 start_page = st.number_input(
-                    "From page",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=1,
-                    key="rotate_start"
+                    "From page", min_value=1, max_value=total_pages, value=1, key="rotate_start"
                 )
             with col2:
                 end_page = st.number_input(
-                    "To page",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=total_pages,
-                    key="rotate_end"
+                    "To page", min_value=1, max_value=total_pages, value=total_pages, key="rotate_end"
                 )
             if start_page > end_page:
                 st.warning("Start page cannot be greater than end page.")
@@ -659,12 +732,12 @@ with tab3:
 
 
 # =====================================================
-# TAB 4: PDF to Word
+# TAB 4: PDF to Word (with editable text)
 # =====================================================
 with tab4:
     st.subheader("Convert PDF to Word (.docx)")
     st.markdown(
-        "Upload a PDF → Convert it to an **editable Word document with real text** → Download"
+        "Upload a PDF → Convert it → **Edit the text** → Download editable Word file"
     )
 
     pdf_to_word_file = st.file_uploader(
@@ -686,7 +759,7 @@ with tab4:
                 "OCR will be used to extract real editable text."
             )
         else:
-            st.info("✅ This PDF already contains selectable text. Layout will be preserved.")
+            st.info("✅ This PDF already contains selectable text.")
 
         with st.expander("👁️ Preview PDF", expanded=False):
             preview_pdf(pdf_bytes, key="pdf2word_preview")
@@ -708,30 +781,80 @@ with tab4:
                 help="Only used when OCR is performed"
             )
 
-        if st.button("📝 Convert to Word", type="primary", use_container_width=True, key="convert_btn"):
+        if st.button("📝 Convert / Extract Text", type="primary", use_container_width=True, key="convert_btn"):
             with st.spinner(
-                "Converting PDF to Word... "
+                "Extracting text... "
                 + ("(using OCR – this may take longer)" if (force_ocr or is_scanned) else "")
             ):
                 try:
-                    docx_bytes = pdf_to_word(
-                        pdf_bytes,
-                        force_ocr=force_ocr,
-                        ocr_lang=ocr_lang
-                    )
-                    st.session_state.converted_docx = docx_bytes
-                    st.success("✅ Conversion completed! The Word file now contains **real editable text**.")
-                except ImportError as e:
-                    st.error(str(e))
-                    st.code("pip install pdf2docx pypdfium2 pytesseract python-docx Pillow", language="bash")
-                except Exception as e:
-                    st.error(f"Conversion failed: {e}")
-                    st.info(
-                        "Tips:\n"
-                        "- For scanned PDFs you need **tesseract-ocr** installed (see packages.txt).\n"
-                        "- Complex layouts may still need some manual cleanup."
-                    )
+                    if force_ocr or is_scanned:
+                        import pypdfium2 as pdfium
+                        import pytesseract
 
+                        pdf = pdfium.PdfDocument(pdf_bytes)
+                        all_text = []
+                        for i in range(len(pdf)):
+                            page = pdf[i]
+                            bitmap = page.render(scale=2.0)
+                            pil_image = bitmap.to_pil()
+                            text = pytesseract.image_to_string(pil_image, lang=ocr_lang)
+                            all_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
+                        extracted_text = "\n\n".join(all_text)
+                    else:
+                        reader = PdfReader(io.BytesIO(pdf_bytes))
+                        pages_text = []
+                        for i, page in enumerate(reader.pages):
+                            text = page.extract_text() or ""
+                            pages_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
+                        extracted_text = "\n\n".join(pages_text)
+
+                    st.session_state.extracted_text = extracted_text
+                    st.session_state.converted_docx = None
+                    st.success("✅ Text extracted! You can now edit it below.")
+                except Exception as e:
+                    st.error(f"Extraction failed: {e}")
+
+        # Editable text area
+        if st.session_state.extracted_text:
+            st.markdown("---")
+            st.subheader("✏️ Edit the extracted text")
+
+            edited_text = st.text_area(
+                "You can freely edit the text below before generating the Word file:",
+                value=st.session_state.extracted_text,
+                height=400,
+                key="edit_text_area"
+            )
+            st.session_state.extracted_text = edited_text
+
+            if st.button("📄 Generate Word from edited text", type="primary", use_container_width=True):
+                from docx import Document
+                from docx.shared import Pt
+
+                doc = Document()
+                style = doc.styles["Normal"]
+                font = style.font
+                font.name = "Arial"
+                font.size = Pt(11)
+
+                pages = edited_text.split("--- Page ")
+                for i, page_content in enumerate(pages):
+                    if not page_content.strip():
+                        continue
+                    if i > 0:
+                        doc.add_page_break()
+                    content = page_content
+                    if "---" in content[:30]:
+                        content = content.split("---", 1)[-1].lstrip()
+                    doc.add_paragraph(content.strip())
+
+                buffer = io.BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                st.session_state.converted_docx = buffer.getvalue()
+                st.success("✅ Word document generated from your edited text!")
+
+        # Download section
         if st.session_state.converted_docx is not None:
             st.markdown("---")
             st.subheader("Download Word File")
