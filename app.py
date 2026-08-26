@@ -5,6 +5,7 @@ import re
 import random
 import string
 import io
+import pandas as pd
 
 # ======================
 # Page Config
@@ -271,6 +272,170 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
     return None
 
 
+def extract_text_from_pdf(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: str = "eng") -> str:
+    """Extract all text from PDF (with optional OCR)."""
+    if use_ocr or not has_extractable_text(pdf_bytes):
+        try:
+            import pypdfium2 as pdfium
+            import pytesseract
+            pdf = pdfium.PdfDocument(pdf_bytes)
+            texts = []
+            for i in range(len(pdf)):
+                page = pdf[i]
+                bitmap = page.render(scale=2.0)
+                pil_image = bitmap.to_pil()
+                text = pytesseract.image_to_string(pil_image, lang=ocr_lang)
+                texts.append(text)
+            return "\n".join(texts)
+        except Exception as e:
+            return f"[OCR failed: {e}]"
+    else:
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            texts = []
+            for page in reader.pages:
+                texts.append(page.extract_text() or "")
+            return "\n".join(texts)
+        except Exception as e:
+            return f"[Text extraction failed: {e}]"
+
+
+def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: str = "eng") -> dict:
+    """
+    Extract common agreement fields from a PDF:
+    - Agreement / Effective Date
+    - Party Name & Address
+    - Signor Name & Title
+    """
+    text = extract_text_from_pdf(pdf_bytes, use_ocr=use_ocr, ocr_lang=ocr_lang)
+    result = {
+        "agreement_date": None,
+        "parties": [],
+        "signors": [],
+        "raw_text_preview": text[:3000] + ("..." if len(text) > 3000 else "")
+    }
+
+    # 1. Agreement / Effective Date
+    date_patterns = [
+        r"(?:agreement|effective|commencement|dated|date of this agreement|as of)[:\s]*([0-9]{1,2}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4})",
+        r"(?:agreement|effective|commencement|dated|date of this agreement|as of)[:\s]*([0-9]{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+[0-9]{2,4})",
+        r"(?:agreement|effective|commencement|dated|date of this agreement|as of)[:\s]*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+[0-9]{1,2},?\s+[0-9]{2,4})",
+        r"dated\s+this\s+([0-9]{1,2}(?:st|nd|rd|th)?\s+day\s+of\s+\w+\s+[0-9]{4})",
+        r"([0-9]{1,2}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4})",
+    ]
+    for pattern in date_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result["agreement_date"] = match.group(1).strip()
+            break
+
+    # 2. Parties (Name + Address)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    potential_parties = []
+    for i, line in enumerate(lines):
+        if any(keyword in line.lower() for keyword in [
+            "limited", "ltd", "inc", "llc", "corporation", "company",
+            "party a", "party b", "the company", "the client"
+        ]):
+            address = ""
+            if i + 1 < len(lines):
+                address = lines[i + 1]
+            if i + 2 < len(lines) and len(lines[i + 2]) > 8:
+                address += ", " + lines[i + 2]
+            potential_parties.append({
+                "name": line[:120],
+                "address": address[:180]
+            })
+    # Deduplicate roughly
+    seen_names = set()
+    unique_parties = []
+    for p in potential_parties:
+        key = p["name"].lower()[:40]
+        if key not in seen_names:
+            seen_names.add(key)
+            unique_parties.append(p)
+    result["parties"] = unique_parties[:5]
+
+    # 3. Signor Name & Title
+    signor_patterns = [
+        r"(?:signed by|signature|for and on behalf of|authorised signatory|authorized signatory)[:\s]*([A-Z][a-zA-Z\s\.]{2,50})",
+        r"(?:name)[:\s]*([A-Z][a-zA-Z\s\.]{2,50})\s*(?:title|position|designation)[:\s]*([A-Za-z\s]{2,50})",
+        r"(?:title|position|designation)[:\s]*([A-Za-z\s]{2,50})",
+    ]
+    signors = []
+    for pattern in signor_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for m in matches:
+            if isinstance(m, tuple):
+                name = m[0].strip() if m[0] else None
+                title = m[1].strip() if len(m) > 1 and m[1] else None
+            else:
+                name = m.strip()
+                title = None
+            if name and len(name) > 2:
+                signors.append({"name": name, "title": title})
+
+    seen = set()
+    unique_signors = []
+    for s in signors:
+        key = (s["name"].lower(), (s["title"] or "").lower())
+        if key not in seen:
+            seen.add(key)
+            unique_signors.append(s)
+    result["signors"] = unique_signors[:6]
+
+    return result
+
+
+def create_agreement_excel(info: dict) -> bytes:
+    """Create an Excel file from extracted agreement info."""
+    rows = []
+
+    # Date
+    rows.append({
+        "Category": "Agreement Date",
+        "Name / Value": info.get("agreement_date") or "Not found",
+        "Address / Title": ""
+    })
+
+    # Parties
+    if info.get("parties"):
+        for i, p in enumerate(info["parties"], 1):
+            rows.append({
+                "Category": f"Party {i}",
+                "Name / Value": p.get("name", ""),
+                "Address / Title": p.get("address", "")
+            })
+    else:
+        rows.append({
+            "Category": "Party",
+            "Name / Value": "Not found",
+            "Address / Title": ""
+        })
+
+    # Signors
+    if info.get("signors"):
+        for i, s in enumerate(info["signors"], 1):
+            rows.append({
+                "Category": f"Signor {i}",
+                "Name / Value": s.get("name", ""),
+                "Address / Title": s.get("title") or ""
+            })
+    else:
+        rows.append({
+            "Category": "Signor",
+            "Name / Value": "Not found",
+            "Address / Title": ""
+        })
+
+    df = pd.DataFrame(rows)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Agreement Info")
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # ======================
 # Session State Init
 # ======================
@@ -296,6 +461,8 @@ if "converted_docx" not in st.session_state:
     st.session_state.converted_docx = None
 if "extracted_text" not in st.session_state:
     st.session_state.extracted_text = None
+if "agreement_info" not in st.session_state:
+    st.session_state.agreement_info = None
 
 
 # ======================
@@ -364,6 +531,7 @@ else:
         st.session_state.total_pages = 0
         st.session_state.converted_docx = None
         st.session_state.extracted_text = None
+        st.session_state.agreement_info = None
         st.rerun()
 
 # Support the Writer
@@ -392,11 +560,12 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔗 Combine Multiple PDFs",
     "📄 Select Pages & Download",
     "🔄 Rotate Pages",
-    "📝 PDF to Word"
+    "📝 PDF to Word",
+    "📋 Extract Agreement Info"
 ])
 
 
@@ -862,3 +1031,91 @@ with tab4:
                 key="download_docx"
             )
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
+
+
+# =====================================================
+# TAB 5: Extract Agreement Info
+# =====================================================
+with tab5:
+    st.subheader("Extract Agreement Information")
+    st.markdown(
+        "Upload an agreement / contract PDF → Extract **Date**, **Party Name & Address**, and **Signor Name & Title**"
+    )
+
+    agreement_file = st.file_uploader(
+        "Upload Agreement PDF",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="agreement_uploader"
+    )
+
+    if agreement_file is not None:
+        pdf_bytes = agreement_file.read()
+        st.success(f"✅ Uploaded: **{agreement_file.name}**")
+
+        use_ocr = st.checkbox("Force OCR (for scanned PDFs)", value=False, key="agreement_ocr")
+        ocr_lang = st.selectbox(
+            "OCR Language",
+            options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
+            index=0,
+            key="agreement_lang"
+        )
+
+        if st.button("🔍 Extract Information", type="primary", use_container_width=True, key="extract_btn"):
+            with st.spinner("Extracting information..."):
+                try:
+                    info = extract_agreement_info(pdf_bytes, use_ocr=use_ocr, ocr_lang=ocr_lang)
+                    st.session_state.agreement_info = info
+                    st.success("✅ Extraction completed!")
+                except Exception as e:
+                    st.error(f"Extraction failed: {e}")
+                    st.session_state.agreement_info = None
+
+        if st.session_state.agreement_info:
+            info = st.session_state.agreement_info
+
+            st.markdown("---")
+            st.subheader("Extracted Results")
+
+            # Agreement Date
+            st.markdown("#### 📅 Agreement / Effective Date")
+            if info["agreement_date"]:
+                st.success(info["agreement_date"])
+            else:
+                st.warning("Not found automatically")
+
+            # Parties
+            st.markdown("#### 👥 Parties (Name & Address)")
+            if info["parties"]:
+                for i, p in enumerate(info["parties"], 1):
+                    st.write(f"**Party {i}**")
+                    st.write(f"- **Name:** {p['name']}")
+                    st.write(f"- **Address:** {p['address'] or 'Not found'}")
+            else:
+                st.warning("No clear party information found")
+
+            # Signors
+            st.markdown("#### ✍️ Signor(s) Name & Title")
+            if info["signors"]:
+                for i, s in enumerate(info["signors"], 1):
+                    st.write(f"**Signor {i}**")
+                    st.write(f"- **Name:** {s['name']}")
+                    st.write(f"- **Title:** {s['title'] or 'Not found'}")
+            else:
+                st.warning("No clear signor information found")
+
+            # Download as Excel
+            st.markdown("---")
+            excel_bytes = create_agreement_excel(info)
+            st.download_button(
+                label="📥 Download as Excel",
+                data=excel_bytes,
+                file_name=f"agreement_info_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary",
+                key="download_agreement_excel"
+            )
+
+            with st.expander("📄 View extracted raw text (for verification)"):
+                st.text(info["raw_text_preview"])
