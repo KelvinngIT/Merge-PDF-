@@ -5,3 +5,5 @@ pypdfium2
 Pillow
 pytesseract
 python-docx
+pandas
+openpyxl
