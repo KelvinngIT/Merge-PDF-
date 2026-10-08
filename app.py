@@ -23,10 +23,8 @@ def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
 
-
 def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
-
 
 def merge_pdfs(uploaded_files):
     writer = PdfWriter()
@@ -40,7 +38,6 @@ def merge_pdfs(uploaded_files):
             return None
     return writer
 
-
 def extract_pages(pdf_bytes, selected_pages):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
@@ -52,7 +49,6 @@ def extract_pages(pdf_bytes, selected_pages):
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-
 
 def rotate_pages(pdf_bytes, selected_pages, angle):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -69,7 +65,6 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     buffer.seek(0)
     return buffer.getvalue()
 
-
 def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -83,7 +78,6 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
     except Exception:
         return False
 
-
 def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
     from pdf2docx import Converter
     docx_stream = io.BytesIO()
@@ -94,7 +88,6 @@ def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
         cv.close()
     docx_stream.seek(0)
     return docx_stream.getvalue()
-
 
 def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     import pypdfium2 as pdfium
@@ -114,7 +107,6 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
         bitmap = page.render(scale=2.0)
         pil_image = bitmap.to_pil()
         text = pytesseract.image_to_string(pil_image, lang=lang)
-
         if i > 0:
             doc.add_page_break()
         doc.add_paragraph(f"--- Page {i + 1} ---")
@@ -124,7 +116,6 @@ def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     doc.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-
 
 def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng") -> bytes:
     try:
@@ -140,8 +131,8 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
     else:
         return pdf_to_word_with_pdf2docx(pdf_bytes)
 
-
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
+    """Simple PDF page preview (renders pages as images)."""
     if not pdf_bytes:
         st.warning("No PDF data to preview.")
         return
@@ -165,16 +156,17 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
         st.caption(f"📄 Preview — showing {min(n_pages, max_pages)} of {n_pages} page(s)")
+
         for i in range(min(n_pages, max_pages)):
             page = pdf[i]
             bitmap = page.render(scale=1.5)
             pil_image = bitmap.to_pil()
             st.image(pil_image, caption=f"Page {i + 1}", use_container_width=True)
+
         if n_pages > max_pages:
             st.info(f"Only the first {max_pages} pages are shown for performance.")
     except Exception as e:
         st.error(f"Could not render PDF preview: {e}")
-
 
 def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int = 20):
     if not pdf_bytes:
@@ -221,15 +213,12 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
 
     st.markdown("**3. Preview of selected pages**")
     cols = st.columns(2)
-
     for idx, page_num in enumerate(selected_pages[:max_pages]):
         page = pdf[page_num - 1]
         bitmap = page.render(scale=1.3)
         pil_image = bitmap.to_pil()
-
         if rotate_choice != 0:
             pil_image = pil_image.rotate(-rotate_choice, expand=True)
-
         with cols[idx % 2]:
             st.image(
                 pil_image,
@@ -246,7 +235,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
             try:
                 reader = PdfReader(io.BytesIO(pdf_bytes))
                 writer = PdfWriter()
-
                 for page_num in selected_pages:
                     page = reader.pages[page_num - 1]
                     if rotate_choice != 0:
@@ -264,16 +252,12 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
                     + (f", rotated {rotate_choice}°" if rotate_choice else "")
                 )
                 return edited_bytes
-
             except Exception as e:
                 st.error(f"Failed to create edited PDF: {e}")
                 return None
-
     return None
 
-
 def extract_text_from_pdf(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: str = "eng") -> str:
-    """Extract all text from PDF (with optional OCR)."""
     if use_ocr or not has_extractable_text(pdf_bytes):
         try:
             import pypdfium2 as pdfium
@@ -299,14 +283,7 @@ def extract_text_from_pdf(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: str
         except Exception as e:
             return f"[Text extraction failed: {e}]"
 
-
 def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: str = "eng") -> dict:
-    """
-    Extract common agreement fields from a PDF:
-    - Agreement / Effective Date
-    - Party Name & Address
-    - Signor Name & Title
-    """
     text = extract_text_from_pdf(pdf_bytes, use_ocr=use_ocr, ocr_lang=ocr_lang)
     result = {
         "agreement_date": None,
@@ -315,7 +292,6 @@ def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: st
         "raw_text_preview": text[:3000] + ("..." if len(text) > 3000 else "")
     }
 
-    # 1. Agreement / Effective Date
     date_patterns = [
         r"(?:agreement|effective|commencement|dated|date of this agreement|as of)[:\s]*([0-9]{1,2}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4})",
         r"(?:agreement|effective|commencement|dated|date of this agreement|as of)[:\s]*([0-9]{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+[0-9]{2,4})",
@@ -329,7 +305,6 @@ def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: st
             result["agreement_date"] = match.group(1).strip()
             break
 
-    # 2. Parties (Name + Address)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     potential_parties = []
     for i, line in enumerate(lines):
@@ -346,7 +321,7 @@ def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: st
                 "name": line[:120],
                 "address": address[:180]
             })
-    # Deduplicate roughly
+
     seen_names = set()
     unique_parties = []
     for p in potential_parties:
@@ -356,7 +331,6 @@ def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: st
             unique_parties.append(p)
     result["parties"] = unique_parties[:5]
 
-    # 3. Signor Name & Title
     signor_patterns = [
         r"(?:signed by|signature|for and on behalf of|authorised signatory|authorized signatory)[:\s]*([A-Z][a-zA-Z\s\.]{2,50})",
         r"(?:name)[:\s]*([A-Z][a-zA-Z\s\.]{2,50})\s*(?:title|position|designation)[:\s]*([A-Za-z\s]{2,50})",
@@ -383,22 +357,15 @@ def extract_agreement_info(pdf_bytes: bytes, use_ocr: bool = False, ocr_lang: st
             seen.add(key)
             unique_signors.append(s)
     result["signors"] = unique_signors[:6]
-
     return result
 
-
 def create_agreement_excel(info: dict) -> bytes:
-    """Create an Excel file from extracted agreement info."""
     rows = []
-
-    # Date
     rows.append({
         "Category": "Agreement Date",
         "Name / Value": info.get("agreement_date") or "Not found",
         "Address / Title": ""
     })
-
-    # Parties
     if info.get("parties"):
         for i, p in enumerate(info["parties"], 1):
             rows.append({
@@ -412,8 +379,6 @@ def create_agreement_excel(info: dict) -> bytes:
             "Name / Value": "Not found",
             "Address / Title": ""
         })
-
-    # Signors
     if info.get("signors"):
         for i, s in enumerate(info["signors"], 1):
             rows.append({
@@ -434,7 +399,6 @@ def create_agreement_excel(info: dict) -> bytes:
         df.to_excel(writer, index=False, sheet_name="Agreement Info")
     buffer.seek(0)
     return buffer.getvalue()
-
 
 # ======================
 # Session State Init
@@ -464,7 +428,6 @@ if "extracted_text" not in st.session_state:
 if "agreement_info" not in st.session_state:
     st.session_state.agreement_info = None
 
-
 # ======================
 # Sidebar - Login + Support
 # ======================
@@ -492,7 +455,6 @@ if not st.session_state.logged_in:
     else:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
-
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -502,13 +464,11 @@ if not st.session_state.logged_in:
                 )
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
@@ -534,20 +494,16 @@ else:
         st.session_state.agreement_info = None
         st.rerun()
 
-# Support the Writer
 st.sidebar.markdown("---")
 st.sidebar.subheader("💖 Support the Writer")
 st.sidebar.markdown("If this tool helped you, consider buying me a coffee!")
-
 SUPPORT_URL = "https://buymeacoffee.com/itmasterngw"
-
 st.sidebar.link_button(
     "☕ Buy Me a Coffee",
     SUPPORT_URL,
     use_container_width=True,
     type="primary"
 )
-
 
 # ======================
 # Main App
@@ -568,7 +524,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📋 Extract Agreement Info"
 ])
 
-
 # =====================================================
 # TAB 1: Combine Multiple PDFs
 # =====================================================
@@ -588,6 +543,21 @@ with tab1:
         st.markdown("**Files in merge order:**")
         for i, f in enumerate(uploaded_files, 1):
             st.write(f"{i}. `{f.name}` ({f.size / 1024:.1f} KB)")
+
+        # ---- View individual PDFs right after upload ----
+        st.markdown("---")
+        st.subheader("👁️ View Uploaded PDFs")
+        selected_to_view = st.selectbox(
+            "Select a file to preview",
+            options=[f.name for f in uploaded_files],
+            key="view_uploaded_select"
+        )
+        if selected_to_view:
+            file_to_view = next(f for f in uploaded_files if f.name == selected_to_view)
+            file_bytes = file_to_view.read()
+            file_to_view.seek(0)  # reset pointer for later use
+            with st.expander(f"Preview: {selected_to_view}", expanded=True):
+                preview_pdf(file_bytes, key=f"view_{selected_to_view}")
 
         st.markdown("---")
         if st.button("🔗 Combine All PDFs", type="primary", use_container_width=True, key="merge_btn"):
@@ -632,7 +602,6 @@ with tab1:
                 st.session_state.merged_pdf = edited
                 st.rerun()
 
-
 # =====================================================
 # TAB 2: Select Pages & Download
 # =====================================================
@@ -651,471 +620,3 @@ with tab2:
         pdf_bytes = single_file.read()
         st.session_state.single_pdf_bytes = pdf_bytes
         st.session_state.single_pdf_name = single_file.name
-
-        try:
-            reader = PdfReader(io.BytesIO(pdf_bytes))
-            total_pages = len(reader.pages)
-            st.session_state.total_pages = total_pages
-        except Exception as e:
-            st.error(f"Cannot read this PDF: {e}")
-            st.stop()
-
-        st.success(f"✅ Uploaded: **{single_file.name}**")
-        st.info(f"This PDF has **{total_pages}** page(s)")
-
-        with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
-            edited = preview_and_edit_pdf(pdf_bytes, key="single_edit")
-            if edited is not None:
-                st.session_state.single_pdf_bytes = edited
-                st.session_state.total_pages = len(PdfReader(io.BytesIO(edited)).pages)
-                st.rerun()
-
-        st.markdown("---")
-        st.subheader("1️⃣ Select Pages")
-
-        selection_mode = st.radio(
-            "How do you want to select pages?",
-            options=["Select specific pages", "Select page range", "Download all pages"],
-            horizontal=True,
-            key="select_mode"
-        )
-
-        selected_pages = []
-        if selection_mode == "Select specific pages":
-            page_options = list(range(1, total_pages + 1))
-            selected_pages = st.multiselect(
-                "Choose pages (you can select multiple)",
-                options=page_options,
-                default=[1] if total_pages >= 1 else [],
-                key="select_multiselect"
-            )
-        elif selection_mode == "Select page range":
-            col1, col2 = st.columns(2)
-            with col1:
-                start_page = st.number_input(
-                    "From page", min_value=1, max_value=total_pages, value=1, key="select_start"
-                )
-            with col2:
-                end_page = st.number_input(
-                    "To page", min_value=1, max_value=total_pages, value=total_pages, key="select_end"
-                )
-            if start_page > end_page:
-                st.warning("Start page cannot be greater than end page.")
-            else:
-                selected_pages = list(range(start_page, end_page + 1))
-                st.write(f"Selected pages: **{start_page} to {end_page}** ({len(selected_pages)} pages)")
-        else:
-            selected_pages = list(range(1, total_pages + 1))
-            st.write(f"All **{total_pages}** pages will be included.")
-
-        st.markdown("---")
-        st.subheader("2️⃣ Download Selected Pages")
-
-        if selected_pages:
-            original_name = single_file.name
-            if original_name.lower().endswith(".pdf"):
-                original_name = original_name[:-4]
-
-            custom_filename = st.text_input(
-                "Enter your preferred file name",
-                value=f"{original_name}_selected",
-                key="single_custom_name"
-            )
-            custom_filename = custom_filename.strip()
-            if not custom_filename:
-                custom_filename = "selected_pages"
-            if not custom_filename.lower().endswith(".pdf"):
-                custom_filename += ".pdf"
-
-            try:
-                with st.spinner("Preparing your PDF..."):
-                    extracted_pdf = extract_pages(pdf_bytes, selected_pages)
-
-                st.download_button(
-                    label="📥 Download Selected Pages",
-                    data=extracted_pdf,
-                    file_name=custom_filename,
-                    mime="application/pdf",
-                    use_container_width=True,
-                    type="primary",
-                    key="download_selected"
-                )
-                st.success(f"Ready to download **{len(selected_pages)}** page(s)")
-                st.caption(f"File name: **{custom_filename}**")
-                st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
-
-                with st.expander("👁️ Preview Selected Pages", expanded=False):
-                    preview_pdf(extracted_pdf, key="selected_preview")
-            except Exception as e:
-                st.error(f"Error preparing PDF: {e}")
-        else:
-            st.warning("Please select at least one page.")
-
-
-# =====================================================
-# TAB 3: Rotate Pages
-# =====================================================
-with tab3:
-    st.subheader("Rotate Pages in PDF")
-    st.markdown("Upload a PDF → Select pages → Choose rotation angle → Download the rotated file")
-
-    rotate_file = st.file_uploader(
-        "Upload a PDF file to rotate",
-        type=["pdf"],
-        accept_multiple_files=False,
-        key="rotate_uploader"
-    )
-
-    if rotate_file is not None:
-        rotate_pdf_bytes = rotate_file.read()
-
-        try:
-            reader = PdfReader(io.BytesIO(rotate_pdf_bytes))
-            total_pages = len(reader.pages)
-        except Exception as e:
-            st.error(f"Cannot read this PDF: {e}")
-            st.stop()
-
-        st.success(f"✅ Uploaded: **{rotate_file.name}**")
-        st.info(f"This PDF has **{total_pages}** page(s)")
-
-        with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
-            edited = preview_and_edit_pdf(rotate_pdf_bytes, key="rotate_edit")
-            if edited is not None:
-                st.download_button(
-                    "📥 Download Edited PDF",
-                    data=edited,
-                    file_name="edited.pdf",
-                    mime="application/pdf",
-                    key="download_edited_rotate"
-                )
-
-        st.markdown("---")
-        st.subheader("1️⃣ Select Pages to Rotate")
-
-        rotate_mode = st.radio(
-            "How do you want to select pages?",
-            options=["Select specific pages", "Select page range", "Rotate all pages"],
-            horizontal=True,
-            key="rotate_mode"
-        )
-
-        pages_to_rotate = []
-
-        if rotate_mode == "Select specific pages":
-            page_options = list(range(1, total_pages + 1))
-            pages_to_rotate = st.multiselect(
-                "Choose pages to rotate",
-                options=page_options,
-                default=[1] if total_pages >= 1 else [],
-                key="rotate_multiselect"
-            )
-        elif rotate_mode == "Select page range":
-            col1, col2 = st.columns(2)
-            with col1:
-                start_page = st.number_input(
-                    "From page", min_value=1, max_value=total_pages, value=1, key="rotate_start"
-                )
-            with col2:
-                end_page = st.number_input(
-                    "To page", min_value=1, max_value=total_pages, value=total_pages, key="rotate_end"
-                )
-            if start_page > end_page:
-                st.warning("Start page cannot be greater than end page.")
-            else:
-                pages_to_rotate = list(range(start_page, end_page + 1))
-                st.write(f"Pages to rotate: **{start_page} to {end_page}** ({len(pages_to_rotate)} pages)")
-        else:
-            pages_to_rotate = list(range(1, total_pages + 1))
-            st.write(f"All **{total_pages}** pages will be rotated.")
-
-        st.markdown("---")
-        st.subheader("2️⃣ Choose Rotation Angle")
-
-        angle = st.selectbox(
-            "Rotate clockwise by",
-            options=[90, 180, 270],
-            format_func=lambda x: f"{x}° clockwise",
-            key="rotate_angle"
-        )
-
-        st.markdown("---")
-        st.subheader("3️⃣ Download Rotated PDF")
-
-        if pages_to_rotate:
-            original_name = rotate_file.name
-            if original_name.lower().endswith(".pdf"):
-                original_name = original_name[:-4]
-
-            custom_filename = st.text_input(
-                "Enter your preferred file name",
-                value=f"{original_name}_rotated_{angle}",
-                key="rotate_custom_name"
-            )
-            custom_filename = custom_filename.strip()
-            if not custom_filename:
-                custom_filename = f"rotated_{angle}"
-            if not custom_filename.lower().endswith(".pdf"):
-                custom_filename += ".pdf"
-
-            try:
-                with st.spinner("Rotating pages..."):
-                    rotated_pdf = rotate_pages(rotate_pdf_bytes, pages_to_rotate, angle)
-
-                st.download_button(
-                    label="📥 Download Rotated PDF",
-                    data=rotated_pdf,
-                    file_name=custom_filename,
-                    mime="application/pdf",
-                    use_container_width=True,
-                    type="primary",
-                    key="download_rotated"
-                )
-                st.success(
-                    f"Ready! **{len(pages_to_rotate)}** page(s) rotated by **{angle}°** clockwise"
-                )
-                st.caption(f"File name: **{custom_filename}**")
-                st.caption(f"File size: {len(rotated_pdf) / 1024:.1f} KB")
-
-                with st.expander("👁️ Preview Rotated PDF", expanded=False):
-                    preview_pdf(rotated_pdf, key="rotated_preview")
-            except Exception as e:
-                st.error(f"Error rotating PDF: {e}")
-        else:
-            st.warning("Please select at least one page to rotate.")
-
-
-# =====================================================
-# TAB 4: PDF to Word
-# =====================================================
-with tab4:
-    st.subheader("Convert PDF to Word (.docx)")
-    st.markdown(
-        "Upload a PDF → Convert it → **Edit the text** → Download editable Word file"
-    )
-
-    pdf_to_word_file = st.file_uploader(
-        "Upload a PDF file to convert",
-        type=["pdf"],
-        accept_multiple_files=False,
-        key="pdf2word_uploader"
-    )
-
-    if pdf_to_word_file is not None:
-        pdf_bytes = pdf_to_word_file.read()
-        st.success(f"✅ Uploaded: **{pdf_to_word_file.name}**")
-        st.caption(f"File size: {len(pdf_bytes) / 1024:.1f} KB")
-
-        is_scanned = not has_extractable_text(pdf_bytes)
-        if is_scanned:
-            st.warning(
-                "⚠️ This looks like a **scanned / image-only PDF**. "
-                "OCR will be used to extract real editable text."
-            )
-        else:
-            st.info("✅ This PDF already contains selectable text.")
-
-        with st.expander("👁️ Preview PDF", expanded=False):
-            preview_pdf(pdf_bytes, key="pdf2word_preview")
-
-        st.markdown("---")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            force_ocr = st.checkbox(
-                "Force OCR (even if text is present)",
-                value=False
-            )
-        with col2:
-            ocr_lang = st.selectbox(
-                "OCR Language",
-                options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
-                index=0
-            )
-
-        if st.button("📝 Convert / Extract Text", type="primary", use_container_width=True, key="convert_btn"):
-            with st.spinner(
-                "Extracting text... "
-                + ("(using OCR – this may take longer)" if (force_ocr or is_scanned) else "")
-            ):
-                try:
-                    if force_ocr or is_scanned:
-                        import pypdfium2 as pdfium
-                        import pytesseract
-
-                        pdf = pdfium.PdfDocument(pdf_bytes)
-                        all_text = []
-                        for i in range(len(pdf)):
-                            page = pdf[i]
-                            bitmap = page.render(scale=2.0)
-                            pil_image = bitmap.to_pil()
-                            text = pytesseract.image_to_string(pil_image, lang=ocr_lang)
-                            all_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
-                        extracted_text = "\n\n".join(all_text)
-                    else:
-                        reader = PdfReader(io.BytesIO(pdf_bytes))
-                        pages_text = []
-                        for i, page in enumerate(reader.pages):
-                            text = page.extract_text() or ""
-                            pages_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
-                        extracted_text = "\n\n".join(pages_text)
-
-                    st.session_state.extracted_text = extracted_text
-                    st.session_state.converted_docx = None
-                    st.success("✅ Text extracted! You can now edit it below.")
-                except Exception as e:
-                    st.error(f"Extraction failed: {e}")
-
-        if st.session_state.extracted_text:
-            st.markdown("---")
-            st.subheader("✏️ Edit the extracted text")
-
-            edited_text = st.text_area(
-                "You can freely edit the text below before generating the Word file:",
-                value=st.session_state.extracted_text,
-                height=400,
-                key="edit_text_area"
-            )
-            st.session_state.extracted_text = edited_text
-
-            if st.button("📄 Generate Word from edited text", type="primary", use_container_width=True):
-                from docx import Document
-                from docx.shared import Pt
-
-                doc = Document()
-                style = doc.styles["Normal"]
-                font = style.font
-                font.name = "Arial"
-                font.size = Pt(11)
-
-                pages = edited_text.split("--- Page ")
-                for i, page_content in enumerate(pages):
-                    if not page_content.strip():
-                        continue
-                    if i > 0:
-                        doc.add_page_break()
-                    content = page_content
-                    if "---" in content[:30]:
-                        content = content.split("---", 1)[-1].lstrip()
-                    doc.add_paragraph(content.strip())
-
-                buffer = io.BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
-                st.session_state.converted_docx = buffer.getvalue()
-                st.success("✅ Word document generated from your edited text!")
-
-        if st.session_state.converted_docx is not None:
-            st.markdown("---")
-            st.subheader("Download Word File")
-
-            original_name = pdf_to_word_file.name
-            if original_name.lower().endswith(".pdf"):
-                original_name = original_name[:-4]
-
-            custom_name = st.text_input(
-                "Custom file name (optional)",
-                value=f"{original_name}.docx",
-                key="docx_custom_name"
-            )
-            if not custom_name.lower().endswith(".docx"):
-                custom_name += ".docx"
-
-            st.download_button(
-                label="📥 Download Word Document",
-                data=st.session_state.converted_docx,
-                file_name=custom_name,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                type="primary",
-                key="download_docx"
-            )
-            st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
-
-
-# =====================================================
-# TAB 5: Extract Agreement Info
-# =====================================================
-with tab5:
-    st.subheader("Extract Agreement Information")
-    st.markdown(
-        "Upload an agreement / contract PDF → Extract **Date**, **Party Name & Address**, and **Signor Name & Title**"
-    )
-
-    agreement_file = st.file_uploader(
-        "Upload Agreement PDF",
-        type=["pdf"],
-        accept_multiple_files=False,
-        key="agreement_uploader"
-    )
-
-    if agreement_file is not None:
-        pdf_bytes = agreement_file.read()
-        st.success(f"✅ Uploaded: **{agreement_file.name}**")
-
-        use_ocr = st.checkbox("Force OCR (for scanned PDFs)", value=False, key="agreement_ocr")
-        ocr_lang = st.selectbox(
-            "OCR Language",
-            options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
-            index=0,
-            key="agreement_lang"
-        )
-
-        if st.button("🔍 Extract Information", type="primary", use_container_width=True, key="extract_btn"):
-            with st.spinner("Extracting information..."):
-                try:
-                    info = extract_agreement_info(pdf_bytes, use_ocr=use_ocr, ocr_lang=ocr_lang)
-                    st.session_state.agreement_info = info
-                    st.success("✅ Extraction completed!")
-                except Exception as e:
-                    st.error(f"Extraction failed: {e}")
-                    st.session_state.agreement_info = None
-
-        if st.session_state.agreement_info:
-            info = st.session_state.agreement_info
-
-            st.markdown("---")
-            st.subheader("Extracted Results")
-
-            # Agreement Date
-            st.markdown("#### 📅 Agreement / Effective Date")
-            if info["agreement_date"]:
-                st.success(info["agreement_date"])
-            else:
-                st.warning("Not found automatically")
-
-            # Parties
-            st.markdown("#### 👥 Parties (Name & Address)")
-            if info["parties"]:
-                for i, p in enumerate(info["parties"], 1):
-                    st.write(f"**Party {i}**")
-                    st.write(f"- **Name:** {p['name']}")
-                    st.write(f"- **Address:** {p['address'] or 'Not found'}")
-            else:
-                st.warning("No clear party information found")
-
-            # Signors
-            st.markdown("#### ✍️ Signor(s) Name & Title")
-            if info["signors"]:
-                for i, s in enumerate(info["signors"], 1):
-                    st.write(f"**Signor {i}**")
-                    st.write(f"- **Name:** {s['name']}")
-                    st.write(f"- **Title:** {s['title'] or 'Not found'}")
-            else:
-                st.warning("No clear signor information found")
-
-            # Download as Excel
-            st.markdown("---")
-            excel_bytes = create_agreement_excel(info)
-            st.download_button(
-                label="📥 Download as Excel",
-                data=excel_bytes,
-                file_name=f"agreement_info_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                type="primary",
-                key="download_agreement_excel"
-            )
-
-            with st.expander("📄 View extracted raw text (for verification)"):
-                st.text(info["raw_text_preview"])
