@@ -5,6 +5,12 @@ import re
 import random
 import string
 import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.colors import Color, HexColor
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from PIL import Image as PILImage
 
 # ======================
 # Page Config
@@ -22,10 +28,8 @@ def is_valid_email(email: str) -> bool:
     pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email.strip()))
 
-
 def generate_verification_code(length=6):
     return "".join(random.choices(string.digits, k=length))
-
 
 def merge_pdfs(uploaded_files):
     writer = PdfWriter()
@@ -39,7 +43,6 @@ def merge_pdfs(uploaded_files):
             return None
     return writer
 
-
 def extract_pages(pdf_bytes, selected_pages):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
@@ -51,7 +54,6 @@ def extract_pages(pdf_bytes, selected_pages):
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-
 
 def rotate_pages(pdf_bytes, selected_pages, angle):
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -68,7 +70,6 @@ def rotate_pages(pdf_bytes, selected_pages, angle):
     buffer.seek(0)
     return buffer.getvalue()
 
-
 def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -82,7 +83,6 @@ def has_extractable_text(pdf_bytes: bytes, min_chars: int = 30) -> bool:
     except Exception:
         return False
 
-
 def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
     from pdf2docx import Converter
     docx_stream = io.BytesIO()
@@ -94,43 +94,36 @@ def pdf_to_word_with_pdf2docx(pdf_bytes: bytes) -> bytes:
     docx_stream.seek(0)
     return docx_stream.getvalue()
 
-
 def pdf_to_word_with_ocr(pdf_bytes: bytes, lang: str = "eng") -> bytes:
     import pypdfium2 as pdfium
     import pytesseract
     from docx import Document
     from docx.shared import Pt
-
     pdf = pdfium.PdfDocument(pdf_bytes)
     doc = Document()
     style = doc.styles["Normal"]
     font = style.font
     font.name = "Arial"
     font.size = Pt(11)
-
     for i in range(len(pdf)):
         page = pdf[i]
         bitmap = page.render(scale=2.0)
         pil_image = bitmap.to_pil()
         text = pytesseract.image_to_string(pil_image, lang=lang)
-
         if i > 0:
             doc.add_page_break()
         doc.add_paragraph(f"--- Page {i + 1} ---")
         doc.add_paragraph(text.strip() if text.strip() else "[No text detected on this page]")
-
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-
 
 def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng") -> bytes:
     try:
         from pdf2docx import Converter
     except ImportError:
         raise ImportError("Missing package: pdf2docx\nPlease install it with: pip install pdf2docx")
-
     if force_ocr or not has_extractable_text(pdf_bytes):
         try:
             return pdf_to_word_with_ocr(pdf_bytes, lang=ocr_lang)
@@ -139,12 +132,10 @@ def pdf_to_word(pdf_bytes: bytes, force_ocr: bool = False, ocr_lang: str = "eng"
     else:
         return pdf_to_word_with_pdf2docx(pdf_bytes)
 
-
 def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     if not pdf_bytes:
         st.warning("No PDF data to preview.")
         return
-
     missing = []
     try:
         import pypdfium2 as pdfium
@@ -154,12 +145,10 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
         from PIL import Image  # noqa: F401
     except ImportError:
         missing.append("Pillow")
-
     if missing:
         st.error(f"❌ Missing package(s): {', '.join(missing)}")
         st.code(f"pip install {' '.join(missing)}", language="bash")
         return
-
     try:
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
@@ -174,12 +163,10 @@ def preview_pdf(pdf_bytes: bytes, key: str = "pdf_preview", max_pages: int = 8):
     except Exception as e:
         st.error(f"Could not render PDF preview: {e}")
 
-
 def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int = 20):
     if not pdf_bytes:
         st.warning("No PDF data to preview/edit.")
         return None
-
     try:
         import pypdfium2 as pdfium
         from PIL import Image
@@ -187,16 +174,13 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
         st.error(f"Missing package: {e}")
         st.code("pip install pypdfium2 Pillow")
         return None
-
     try:
         pdf = pdfium.PdfDocument(pdf_bytes)
         n_pages = len(pdf)
     except Exception as e:
         st.error(f"Cannot open PDF: {e}")
         return None
-
     st.caption(f"📄 Preview & Edit — {n_pages} page(s)")
-
     st.markdown("**1. Select pages to keep**")
     page_options = list(range(1, n_pages + 1))
     selected_pages = st.multiselect(
@@ -205,11 +189,9 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
         default=page_options,
         key=f"{key}_select_pages"
     )
-
     if not selected_pages:
         st.warning("Please select at least one page.")
         return None
-
     st.markdown("**2. Rotate pages (optional)**")
     rotate_choice = st.selectbox(
         "Rotate selected pages by",
@@ -217,59 +199,113 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
         format_func=lambda x: "No rotation" if x == 0 else f"{x}° clockwise",
         key=f"{key}_rotate"
     )
-
     st.markdown("**3. Preview of selected pages**")
     cols = st.columns(2)
-
     for idx, page_num in enumerate(selected_pages[:max_pages]):
         page = pdf[page_num - 1]
         bitmap = page.render(scale=1.3)
         pil_image = bitmap.to_pil()
-
         if rotate_choice != 0:
             pil_image = pil_image.rotate(-rotate_choice, expand=True)
-
         with cols[idx % 2]:
             st.image(
                 pil_image,
                 caption=f"Page {page_num}" + (f" (rotated {rotate_choice}°)" if rotate_choice else ""),
                 use_container_width=True
             )
-
     if len(selected_pages) > max_pages:
         st.info(f"Showing first {max_pages} of {len(selected_pages)} selected pages.")
-
     st.markdown("---")
     if st.button("✅ Apply edits & create new PDF", type="primary", key=f"{key}_apply"):
         with st.spinner("Building edited PDF..."):
             try:
                 reader = PdfReader(io.BytesIO(pdf_bytes))
                 writer = PdfWriter()
-
                 for page_num in selected_pages:
                     page = reader.pages[page_num - 1]
                     if rotate_choice != 0:
                         page = page.rotate(rotate_choice)
                     writer.add_page(page)
-
                 buffer = io.BytesIO()
                 writer.write(buffer)
                 buffer.seek(0)
                 edited_bytes = buffer.getvalue()
-
                 st.success(
                     f"✅ Edited PDF created! "
                     f"{len(selected_pages)} page(s)"
                     + (f", rotated {rotate_choice}°" if rotate_choice else "")
                 )
                 return edited_bytes
-
             except Exception as e:
                 st.error(f"Failed to create edited PDF: {e}")
                 return None
-
     return None
 
+# =====================================================
+# NEW: Add Text / Image to PDF helpers
+# =====================================================
+def create_text_overlay(page_width, page_height, text, x, y, font_size, color_hex, opacity=1.0):
+    """Create a single-page PDF overlay containing the text."""
+    packet = io.BytesIO()
+    c = canvas.Canvas(packet, pagesize=(page_width, page_height))
+    
+    # Convert hex color
+    try:
+        color = HexColor(color_hex)
+    except Exception:
+        color = HexColor("#000000")
+    
+    c.setFillColor(color, alpha=opacity)
+    c.setFont("Helvetica", font_size)
+    c.drawString(x, y, text)
+    c.save()
+    packet.seek(0)
+    return PdfReader(packet)
+
+def create_image_overlay(page_width, page_height, image_bytes, x, y, width, height, opacity=1.0):
+    """Create a single-page PDF overlay containing the image."""
+    packet = io.BytesIO()
+    c = canvas.Canvas(packet, pagesize=(page_width, page_height))
+    
+    # Save image temporarily in memory
+    img = PILImage.open(io.BytesIO(image_bytes))
+    img_buffer = io.BytesIO()
+    # Convert to RGB if necessary (for JPEG compatibility)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.save(img_buffer, format="PNG")
+    img_buffer.seek(0)
+    
+    c.setFillAlpha(opacity)
+    c.drawImage(img_buffer, x, y, width=width, height=height, mask='auto')
+    c.save()
+    packet.seek(0)
+    return PdfReader(packet)
+
+def add_overlay_to_pdf(pdf_bytes: bytes, pages_to_modify: list, overlay_reader, position="absolute"):
+    """Merge the overlay onto selected pages of the original PDF."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    
+    selected_set = set(pages_to_modify)
+    
+    for i, page in enumerate(reader.pages):
+        page_num = i + 1
+        if page_num in selected_set:
+            # Get page size
+            page_width = float(page.mediabox.width)
+            page_height = float(page.mediabox.height)
+            
+            # The overlay was created with the same page size
+            overlay_page = overlay_reader.pages[0]
+            page.merge_page(overlay_page)
+        
+        writer.add_page(page)
+    
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # ======================
 # Session State Init
@@ -296,13 +332,13 @@ if "converted_docx" not in st.session_state:
     st.session_state.converted_docx = None
 if "extracted_text" not in st.session_state:
     st.session_state.extracted_text = None
-
+if "overlay_result" not in st.session_state:
+    st.session_state.overlay_result = None
 
 # ======================
 # Sidebar - Login + Support
 # ======================
 st.sidebar.header("🔐 Login with Email")
-
 if not st.session_state.logged_in:
     if not st.session_state.code_sent:
         with st.sidebar.form("email_form"):
@@ -325,7 +361,6 @@ if not st.session_state.logged_in:
     else:
         st.sidebar.info(f"Code sent to:\n**{st.session_state.pending_email}**")
         st.sidebar.warning(f"🧪 Demo Code: **{st.session_state.verification_code}**")
-
         with st.sidebar.form("verify_form"):
             user_code = st.text_input("Enter 6-digit verification code", max_chars=6)
             col1, col2 = st.columns(2)
@@ -335,13 +370,11 @@ if not st.session_state.logged_in:
                 )
             with col2:
                 back_btn = st.form_submit_button("← Back", use_container_width=True)
-
             if back_btn:
                 st.session_state.code_sent = False
                 st.session_state.verification_code = None
                 st.session_state.pending_email = None
                 st.rerun()
-
             if verify_btn:
                 if user_code.strip() == st.session_state.verification_code:
                     st.session_state.logged_in = True
@@ -364,22 +397,20 @@ else:
         st.session_state.total_pages = 0
         st.session_state.converted_docx = None
         st.session_state.extracted_text = None
+        st.session_state.overlay_result = None
         st.rerun()
 
 # Support the Writer
 st.sidebar.markdown("---")
 st.sidebar.subheader("💖 Support the Writer")
 st.sidebar.markdown("If this tool helped you, consider buying me a coffee!")
-
 SUPPORT_URL = "https://buymeacoffee.com/itmasterngw"
-
 st.sidebar.link_button(
     "☕ Buy Me a Coffee",
     SUPPORT_URL,
     use_container_width=True,
     type="primary"
 )
-
 
 # ======================
 # Main App
@@ -392,13 +423,13 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔗 Combine Multiple PDFs",
     "📄 Select Pages & Download",
     "🔄 Rotate Pages",
-    "📝 PDF to Word"
+    "📝 PDF to Word",
+    "✏️ Add Text / Image"
 ])
-
 
 # =====================================================
 # TAB 1: Combine Multiple PDFs
@@ -406,20 +437,17 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.subheader("Combine Multiple PDFs into One")
     st.markdown("Upload several PDF files → Merge them → Download the combined file")
-
     uploaded_files = st.file_uploader(
         "Choose one or more PDF files",
         type=["pdf"],
         accept_multiple_files=True,
         key="multi_uploader"
     )
-
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} file(s) uploaded")
         st.markdown("**Files in merge order:**")
         for i, f in enumerate(uploaded_files, 1):
             st.write(f"{i}. `{f.name}` ({f.size / 1024:.1f} KB)")
-
         st.markdown("---")
         if st.button("🔗 Combine All PDFs", type="primary", use_container_width=True, key="merge_btn"):
             with st.spinner("Merging PDFs..."):
@@ -432,7 +460,6 @@ with tab1:
                     st.success(f"✅ Successfully combined {len(uploaded_files)} PDFs!")
                 else:
                     st.error("Failed to merge PDFs.")
-
     if st.session_state.merged_pdf is not None:
         st.markdown("---")
         st.subheader("Download Combined PDF")
@@ -445,7 +472,6 @@ with tab1:
         )
         if not custom_name.lower().endswith(".pdf"):
             custom_name += ".pdf"
-
         st.download_button(
             label="📥 Download Combined PDF",
             data=st.session_state.merged_pdf,
@@ -456,13 +482,11 @@ with tab1:
             key="download_merged"
         )
         st.caption(f"File size: {len(st.session_state.merged_pdf) / 1024:.1f} KB")
-
         with st.expander("👁️ Preview & Edit Combined PDF", expanded=False):
             edited = preview_and_edit_pdf(st.session_state.merged_pdf, key="merged_edit")
             if edited is not None:
                 st.session_state.merged_pdf = edited
                 st.rerun()
-
 
 # =====================================================
 # TAB 2: Select Pages & Download
@@ -470,19 +494,16 @@ with tab1:
 with tab2:
     st.subheader("Select Pages from PDF & Download")
     st.markdown("Upload a PDF → Choose which pages you want → Download with your own file name")
-
     single_file = st.file_uploader(
         "Upload a PDF file",
         type=["pdf"],
         accept_multiple_files=False,
         key="single_uploader"
     )
-
     if single_file is not None:
         pdf_bytes = single_file.read()
         st.session_state.single_pdf_bytes = pdf_bytes
         st.session_state.single_pdf_name = single_file.name
-
         try:
             reader = PdfReader(io.BytesIO(pdf_bytes))
             total_pages = len(reader.pages)
@@ -490,27 +511,22 @@ with tab2:
         except Exception as e:
             st.error(f"Cannot read this PDF: {e}")
             st.stop()
-
         st.success(f"✅ Uploaded: **{single_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
-
         with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
             edited = preview_and_edit_pdf(pdf_bytes, key="single_edit")
             if edited is not None:
                 st.session_state.single_pdf_bytes = edited
                 st.session_state.total_pages = len(PdfReader(io.BytesIO(edited)).pages)
                 st.rerun()
-
         st.markdown("---")
         st.subheader("1️⃣ Select Pages")
-
         selection_mode = st.radio(
             "How do you want to select pages?",
             options=["Select specific pages", "Select page range", "Download all pages"],
             horizontal=True,
             key="select_mode"
         )
-
         selected_pages = []
         if selection_mode == "Select specific pages":
             page_options = list(range(1, total_pages + 1))
@@ -538,15 +554,12 @@ with tab2:
         else:
             selected_pages = list(range(1, total_pages + 1))
             st.write(f"All **{total_pages}** pages will be included.")
-
         st.markdown("---")
         st.subheader("2️⃣ Download Selected Pages")
-
         if selected_pages:
             original_name = single_file.name
             if original_name.lower().endswith(".pdf"):
                 original_name = original_name[:-4]
-
             custom_filename = st.text_input(
                 "Enter your preferred file name",
                 value=f"{original_name}_selected",
@@ -557,11 +570,9 @@ with tab2:
                 custom_filename = "selected_pages"
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
-
             try:
                 with st.spinner("Preparing your PDF..."):
                     extracted_pdf = extract_pages(pdf_bytes, selected_pages)
-
                 st.download_button(
                     label="📥 Download Selected Pages",
                     data=extracted_pdf,
@@ -574,7 +585,6 @@ with tab2:
                 st.success(f"Ready to download **{len(selected_pages)}** page(s)")
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(extracted_pdf) / 1024:.1f} KB")
-
                 with st.expander("👁️ Preview Selected Pages", expanded=False):
                     preview_pdf(extracted_pdf, key="selected_preview")
             except Exception as e:
@@ -582,34 +592,28 @@ with tab2:
         else:
             st.warning("Please select at least one page.")
 
-
 # =====================================================
 # TAB 3: Rotate Pages
 # =====================================================
 with tab3:
     st.subheader("Rotate Pages in PDF")
     st.markdown("Upload a PDF → Select pages → Choose rotation angle → Download the rotated file")
-
     rotate_file = st.file_uploader(
         "Upload a PDF file to rotate",
         type=["pdf"],
         accept_multiple_files=False,
         key="rotate_uploader"
     )
-
     if rotate_file is not None:
         rotate_pdf_bytes = rotate_file.read()
-
         try:
             reader = PdfReader(io.BytesIO(rotate_pdf_bytes))
             total_pages = len(reader.pages)
         except Exception as e:
             st.error(f"Cannot read this PDF: {e}")
             st.stop()
-
         st.success(f"✅ Uploaded: **{rotate_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s)")
-
         with st.expander("👁️ Preview & Edit Uploaded PDF", expanded=False):
             edited = preview_and_edit_pdf(rotate_pdf_bytes, key="rotate_edit")
             if edited is not None:
@@ -620,19 +624,15 @@ with tab3:
                     mime="application/pdf",
                     key="download_edited_rotate"
                 )
-
         st.markdown("---")
         st.subheader("1️⃣ Select Pages to Rotate")
-
         rotate_mode = st.radio(
             "How do you want to select pages?",
             options=["Select specific pages", "Select page range", "Rotate all pages"],
             horizontal=True,
             key="rotate_mode"
         )
-
         pages_to_rotate = []
-
         if rotate_mode == "Select specific pages":
             page_options = list(range(1, total_pages + 1))
             pages_to_rotate = st.multiselect(
@@ -659,25 +659,20 @@ with tab3:
         else:
             pages_to_rotate = list(range(1, total_pages + 1))
             st.write(f"All **{total_pages}** pages will be rotated.")
-
         st.markdown("---")
         st.subheader("2️⃣ Choose Rotation Angle")
-
         angle = st.selectbox(
             "Rotate clockwise by",
             options=[90, 180, 270],
             format_func=lambda x: f"{x}° clockwise",
             key="rotate_angle"
         )
-
         st.markdown("---")
         st.subheader("3️⃣ Download Rotated PDF")
-
         if pages_to_rotate:
             original_name = rotate_file.name
             if original_name.lower().endswith(".pdf"):
                 original_name = original_name[:-4]
-
             custom_filename = st.text_input(
                 "Enter your preferred file name",
                 value=f"{original_name}_rotated_{angle}",
@@ -688,11 +683,9 @@ with tab3:
                 custom_filename = f"rotated_{angle}"
             if not custom_filename.lower().endswith(".pdf"):
                 custom_filename += ".pdf"
-
             try:
                 with st.spinner("Rotating pages..."):
                     rotated_pdf = rotate_pages(rotate_pdf_bytes, pages_to_rotate, angle)
-
                 st.download_button(
                     label="📥 Download Rotated PDF",
                     data=rotated_pdf,
@@ -707,14 +700,12 @@ with tab3:
                 )
                 st.caption(f"File name: **{custom_filename}**")
                 st.caption(f"File size: {len(rotated_pdf) / 1024:.1f} KB")
-
                 with st.expander("👁️ Preview Rotated PDF", expanded=False):
                     preview_pdf(rotated_pdf, key="rotated_preview")
             except Exception as e:
                 st.error(f"Error rotating PDF: {e}")
         else:
             st.warning("Please select at least one page to rotate.")
-
 
 # =====================================================
 # TAB 4: PDF to Word
@@ -724,19 +715,16 @@ with tab4:
     st.markdown(
         "Upload a PDF → Convert it → **Edit the text** → Download editable Word file"
     )
-
     pdf_to_word_file = st.file_uploader(
         "Upload a PDF file to convert",
         type=["pdf"],
         accept_multiple_files=False,
         key="pdf2word_uploader"
     )
-
     if pdf_to_word_file is not None:
         pdf_bytes = pdf_to_word_file.read()
         st.success(f"✅ Uploaded: **{pdf_to_word_file.name}**")
         st.caption(f"File size: {len(pdf_bytes) / 1024:.1f} KB")
-
         is_scanned = not has_extractable_text(pdf_bytes)
         if is_scanned:
             st.warning(
@@ -745,12 +733,9 @@ with tab4:
             )
         else:
             st.info("✅ This PDF already contains selectable text.")
-
         with st.expander("👁️ Preview PDF", expanded=False):
             preview_pdf(pdf_bytes, key="pdf2word_preview")
-
         st.markdown("---")
-
         col1, col2 = st.columns(2)
         with col1:
             force_ocr = st.checkbox(
@@ -763,7 +748,6 @@ with tab4:
                 options=["eng", "chi_sim", "chi_tra", "jpn", "kor", "fra", "deu", "spa"],
                 index=0
             )
-
         if st.button("📝 Convert / Extract Text", type="primary", use_container_width=True, key="convert_btn"):
             with st.spinner(
                 "Extracting text... "
@@ -773,7 +757,6 @@ with tab4:
                     if force_ocr or is_scanned:
                         import pypdfium2 as pdfium
                         import pytesseract
-
                         pdf = pdfium.PdfDocument(pdf_bytes)
                         all_text = []
                         for i in range(len(pdf)):
@@ -790,17 +773,14 @@ with tab4:
                             text = page.extract_text() or ""
                             pages_text.append(f"--- Page {i + 1} ---\n{text.strip()}")
                         extracted_text = "\n\n".join(pages_text)
-
                     st.session_state.extracted_text = extracted_text
                     st.session_state.converted_docx = None
                     st.success("✅ Text extracted! You can now edit it below.")
                 except Exception as e:
                     st.error(f"Extraction failed: {e}")
-
         if st.session_state.extracted_text:
             st.markdown("---")
             st.subheader("✏️ Edit the extracted text")
-
             edited_text = st.text_area(
                 "You can freely edit the text below before generating the Word file:",
                 value=st.session_state.extracted_text,
@@ -808,17 +788,14 @@ with tab4:
                 key="edit_text_area"
             )
             st.session_state.extracted_text = edited_text
-
             if st.button("📄 Generate Word from edited text", type="primary", use_container_width=True):
                 from docx import Document
                 from docx.shared import Pt
-
                 doc = Document()
                 style = doc.styles["Normal"]
                 font = style.font
                 font.name = "Arial"
                 font.size = Pt(11)
-
                 pages = edited_text.split("--- Page ")
                 for i, page_content in enumerate(pages):
                     if not page_content.strip():
@@ -829,21 +806,17 @@ with tab4:
                     if "---" in content[:30]:
                         content = content.split("---", 1)[-1].lstrip()
                     doc.add_paragraph(content.strip())
-
                 buffer = io.BytesIO()
                 doc.save(buffer)
                 buffer.seek(0)
                 st.session_state.converted_docx = buffer.getvalue()
                 st.success("✅ Word document generated from your edited text!")
-
         if st.session_state.converted_docx is not None:
             st.markdown("---")
             st.subheader("Download Word File")
-
             original_name = pdf_to_word_file.name
             if original_name.lower().endswith(".pdf"):
                 original_name = original_name[:-4]
-
             custom_name = st.text_input(
                 "Custom file name (optional)",
                 value=f"{original_name}.docx",
@@ -851,7 +824,6 @@ with tab4:
             )
             if not custom_name.lower().endswith(".docx"):
                 custom_name += ".docx"
-
             st.download_button(
                 label="📥 Download Word Document",
                 data=st.session_state.converted_docx,
@@ -862,3 +834,247 @@ with tab4:
                 key="download_docx"
             )
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
+
+# =====================================================
+# TAB 5: Add Text / Image (NEW)
+# =====================================================
+with tab5:
+    st.subheader("Add Text or Image to PDF")
+    st.markdown("Upload a PDF → Choose text or image → Position it → Apply to selected pages → Download")
+
+    overlay_file = st.file_uploader(
+        "Upload a PDF file",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="overlay_uploader"
+    )
+
+    if overlay_file is not None:
+        overlay_pdf_bytes = overlay_file.read()
+        try:
+            reader = PdfReader(io.BytesIO(overlay_pdf_bytes))
+            total_pages = len(reader.pages)
+            # Get first page size for reference
+            first_page = reader.pages[0]
+            page_width = float(first_page.mediabox.width)
+            page_height = float(first_page.mediabox.height)
+        except Exception as e:
+            st.error(f"Cannot read this PDF: {e}")
+            st.stop()
+
+        st.success(f"✅ Uploaded: **{overlay_file.name}**")
+        st.info(f"This PDF has **{total_pages}** page(s) • Page size: {page_width:.0f} × {page_height:.0f} pts")
+
+        with st.expander("👁️ Preview original PDF", expanded=False):
+            preview_pdf(overlay_pdf_bytes, key="overlay_original_preview")
+
+        st.markdown("---")
+        st.subheader("1️⃣ Choose what to add")
+
+        add_type = st.radio(
+            "Add",
+            options=["Text", "Image"],
+            horizontal=True,
+            key="add_type"
+        )
+
+        st.markdown("---")
+        st.subheader("2️⃣ Select pages")
+
+        page_mode = st.radio(
+            "Apply to",
+            options=["Specific pages", "Page range", "All pages"],
+            horizontal=True,
+            key="overlay_page_mode"
+        )
+
+        pages_to_modify = []
+        if page_mode == "Specific pages":
+            pages_to_modify = st.multiselect(
+                "Select pages",
+                options=list(range(1, total_pages + 1)),
+                default=[1],
+                key="overlay_pages_multi"
+            )
+        elif page_mode == "Page range":
+            col1, col2 = st.columns(2)
+            with col1:
+                start_p = st.number_input("From page", 1, total_pages, 1, key="overlay_start")
+            with col2:
+                end_p = st.number_input("To page", 1, total_pages, total_pages, key="overlay_end")
+            if start_p <= end_p:
+                pages_to_modify = list(range(start_p, end_p + 1))
+                st.write(f"Pages: **{start_p} – {end_p}** ({len(pages_to_modify)} pages)")
+            else:
+                st.warning("Start page cannot be greater than end page.")
+        else:
+            pages_to_modify = list(range(1, total_pages + 1))
+            st.write(f"All **{total_pages}** pages will be modified.")
+
+        st.markdown("---")
+        st.subheader("3️⃣ Configure overlay")
+
+        if add_type == "Text":
+            text_content = st.text_input("Text to add", value="Confidential", key="overlay_text")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                font_size = st.number_input("Font size", min_value=8, max_value=120, value=24, key="font_size")
+            with col2:
+                text_color = st.color_picker("Text color", value="#FF0000", key="text_color")
+            with col3:
+                opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity")
+
+            st.markdown("**Position** (from bottom-left corner, in points)")
+            colx, coly = st.columns(2)
+            with colx:
+                pos_x = st.number_input("X position", value=50.0, key="text_x")
+            with coly:
+                pos_y = st.number_input("Y position", value=page_height - 50, key="text_y")
+
+            # Quick position presets
+            st.caption("Quick positions:")
+            pcols = st.columns(4)
+            if pcols[0].button("Top-Left", key="tl"):
+                st.session_state.text_x = 50.0
+                st.session_state.text_y = page_height - 50
+                st.rerun()
+            if pcols[1].button("Top-Right", key="tr"):
+                st.session_state.text_x = page_width - 200
+                st.session_state.text_y = page_height - 50
+                st.rerun()
+            if pcols[2].button("Bottom-Left", key="bl"):
+                st.session_state.text_x = 50.0
+                st.session_state.text_y = 30.0
+                st.rerun()
+            if pcols[3].button("Center", key="ct"):
+                st.session_state.text_x = page_width / 2 - 50
+                st.session_state.text_y = page_height / 2
+                st.rerun()
+
+        else:  # Image
+            image_file = st.file_uploader(
+                "Upload image (PNG / JPG)",
+                type=["png", "jpg", "jpeg"],
+                key="overlay_image"
+            )
+            
+            if image_file:
+                img_bytes = image_file.read()
+                img = PILImage.open(io.BytesIO(img_bytes))
+                st.image(img, caption="Uploaded image", width=200)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    img_width = st.number_input("Image width (pts)", min_value=20.0, value=150.0, key="img_w")
+                with col2:
+                    # Keep aspect ratio option
+                    keep_ratio = st.checkbox("Keep aspect ratio", value=True, key="keep_ratio")
+                    if keep_ratio:
+                        aspect = img.height / img.width
+                        img_height = img_width * aspect
+                        st.write(f"Height will be: **{img_height:.1f}** pts")
+                    else:
+                        img_height = st.number_input("Image height (pts)", min_value=20.0, value=100.0, key="img_h")
+
+                opacity = st.slider("Opacity", 0.1, 1.0, 0.8, 0.05, key="img_opacity")
+
+                st.markdown("**Position** (from bottom-left corner)")
+                colx, coly = st.columns(2)
+                with colx:
+                    pos_x = st.number_input("X position", value=50.0, key="img_x")
+                with coly:
+                    pos_y = st.number_input("Y position", value=page_height - 180, key="img_y")
+
+                # Quick positions
+                st.caption("Quick positions:")
+                pcols = st.columns(4)
+                if pcols[0].button("Top-Left", key="img_tl"):
+                    st.session_state.img_x = 50.0
+                    st.session_state.img_y = page_height - img_height - 20
+                    st.rerun()
+                if pcols[1].button("Top-Right", key="img_tr"):
+                    st.session_state.img_x = page_width - img_width - 20
+                    st.session_state.img_y = page_height - img_height - 20
+                    st.rerun()
+                if pcols[2].button("Bottom-Right", key="img_br"):
+                    st.session_state.img_x = page_width - img_width - 20
+                    st.session_state.img_y = 20.0
+                    st.rerun()
+                if pcols[3].button("Center", key="img_ct"):
+                    st.session_state.img_x = (page_width - img_width) / 2
+                    st.session_state.img_y = (page_height - img_height) / 2
+                    st.rerun()
+
+        st.markdown("---")
+        st.subheader("4️⃣ Apply & Download")
+
+        if pages_to_modify:
+            can_proceed = True
+            if add_type == "Text" and not text_content.strip():
+                st.warning("Please enter some text.")
+                can_proceed = False
+            if add_type == "Image" and image_file is None:
+                st.warning("Please upload an image.")
+                can_proceed = False
+
+            if can_proceed and st.button("✨ Apply Overlay", type="primary", use_container_width=True, key="apply_overlay"):
+                with st.spinner("Adding overlay to PDF..."):
+                    try:
+                        if add_type == "Text":
+                            overlay = create_text_overlay(
+                                page_width, page_height,
+                                text_content, pos_x, pos_y,
+                                font_size, text_color, opacity
+                            )
+                        else:
+                            # Recalculate height if keep_ratio
+                            if keep_ratio:
+                                aspect = img.height / img.width
+                                final_height = img_width * aspect
+                            else:
+                                final_height = img_height
+                            
+                            overlay = create_image_overlay(
+                                page_width, page_height,
+                                img_bytes, pos_x, pos_y,
+                                img_width, final_height, opacity
+                            )
+
+                        result_bytes = add_overlay_to_pdf(
+                            overlay_pdf_bytes, pages_to_modify, overlay
+                        )
+                        st.session_state.overlay_result = result_bytes
+                        st.success(f"✅ Overlay applied to {len(pages_to_modify)} page(s)!")
+                    except Exception as e:
+                        st.error(f"Failed to apply overlay: {e}")
+
+            if st.session_state.overlay_result is not None:
+                st.markdown("---")
+                original_name = overlay_file.name
+                if original_name.lower().endswith(".pdf"):
+                    original_name = original_name[:-4]
+                
+                custom_name = st.text_input(
+                    "Download file name",
+                    value=f"{original_name}_with_overlay.pdf",
+                    key="overlay_filename"
+                )
+                if not custom_name.lower().endswith(".pdf"):
+                    custom_name += ".pdf"
+
+                st.download_button(
+                    label="📥 Download PDF with Overlay",
+                    data=st.session_state.overlay_result,
+                    file_name=custom_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_overlay"
+                )
+                st.caption(f"File size: {len(st.session_state.overlay_result) / 1024:.1f} KB")
+
+                with st.expander("👁️ Preview result", expanded=True):
+                    preview_pdf(st.session_state.overlay_result, key="overlay_result_preview", max_pages=6)
+        else:
+            st.warning("Please select at least one page.")
