@@ -268,16 +268,13 @@ def create_text_overlay(page_width, page_height, text, x, y, font_size, color_he
     return PdfReader(packet)
 
 def create_image_overlay(page_width, page_height, image_bytes, x, y, width, height, opacity=1.0):
-    """Create a single-page PDF overlay containing the image."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
 
-    # Open and normalize the image
     img = PILImage.open(io.BytesIO(image_bytes))
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
 
-    # Save to BytesIO and wrap with ImageReader (required by reportlab)
     img_buffer = io.BytesIO()
     img.save(img_buffer, format="PNG")
     img_buffer.seek(0)
@@ -299,6 +296,62 @@ def add_overlay_to_pdf(pdf_bytes: bytes, pages_to_modify: list, overlay_reader):
             overlay_page = overlay_reader.pages[0]
             page.merge_page(overlay_page)
         writer.add_page(page)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def add_text_annotation(pdf_bytes: bytes, pages_to_modify: list, text: str, x: float, y: float,
+                        font_size: int = 14, color_hex: str = "#FF0000"):
+    """Add movable FreeText annotation to selected pages."""
+    from pypdf.generic import (
+        DictionaryObject, NameObject, NumberObject, ArrayObject,
+        TextStringObject, FloatObject
+    )
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    selected_set = set(pages_to_modify)
+
+    # Convert hex color to 0-1 RGB
+    color_hex = color_hex.lstrip("#")
+    try:
+        r = int(color_hex[0:2], 16) / 255
+        g = int(color_hex[2:4], 16) / 255
+        b = int(color_hex[4:6], 16) / 255
+    except Exception:
+        r, g, b = 1.0, 0.0, 0.0
+
+    for i, page in enumerate(reader.pages):
+        page_num = i + 1
+        if page_num in selected_set:
+            text_width = max(len(text) * font_size * 0.5, 50)
+            text_height = font_size * 1.4
+
+            rect = ArrayObject([
+                FloatObject(x),
+                FloatObject(y),
+                FloatObject(x + text_width),
+                FloatObject(y + text_height)
+            ])
+
+            annotation = DictionaryObject({
+                NameObject("/Type"): NameObject("/Annot"),
+                NameObject("/Subtype"): NameObject("/FreeText"),
+                NameObject("/Rect"): rect,
+                NameObject("/Contents"): TextStringObject(text),
+                NameObject("/DA"): TextStringObject(f"/Helv {font_size} Tf {r:.3f} {g:.3f} {b:.3f} rg"),
+                NameObject("/F"): NumberObject(4),
+                NameObject("/C"): ArrayObject([FloatObject(r), FloatObject(g), FloatObject(b)]),
+            })
+
+            if "/Annots" in page:
+                page[NameObject("/Annots")].append(annotation)
+            else:
+                page[NameObject("/Annots")] = ArrayObject([annotation])
+
+        writer.add_page(page)
+
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -833,7 +886,7 @@ with tab4:
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
 
 # =====================================================
-# TAB 5: Add Text / Image
+# TAB 5: Add Text / Image  (with Fixed / Movable)
 # =====================================================
 with tab5:
     st.subheader("Add Text or Image to PDF")
@@ -849,16 +902,86 @@ with tab5:
         st.code("Pillow", language="text")
         st.stop()
 
-    st.markdown("---")
+    st.markdown("Upload a PDF → Choose text or image → Choose Fixed or Movable → Position it → Apply")
+
+    overlay_file = st.file_uploader(
+        "Upload a PDF file",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="overlay_uploader"
+    )
+
+    if overlay_file is not None:
+        overlay_pdf_bytes = overlay_file.read()
+        try:
+            reader = PdfReader(io.BytesIO(overlay_pdf_bytes))
+            total_pages = len(reader.pages)
+            first_page = reader.pages[0]
+            page_width = float(first_page.mediabox.width)
+            page_height = float(first_page.mediabox.height)
+        except Exception as e:
+            st.error(f"Cannot read this PDF: {e}")
+            st.stop()
+
+        st.success(f"✅ Uploaded: **{overlay_file.name}**")
+        st.info(f"This PDF has **{total_pages}** page(s) • Page size: {page_width:.0f} × {page_height:.0f} pts")
+
+        with st.expander("👁️ Preview original PDF", expanded=False):
+            preview_pdf(overlay_pdf_bytes, key="overlay_original_preview")
+
+        st.markdown("---")
+        st.subheader("1️⃣ Choose what to add")
+
+        add_type = st.radio(
+            "Add",
+            options=["Text", "Image"],
+            horizontal=True,
+            key="add_type"
+        )
+
+        st.markdown("---")
+        st.subheader("2️⃣ Select pages")
+
+        page_mode = st.radio(
+            "Apply to",
+            options=["Specific pages", "Page range", "All pages"],
+            horizontal=True,
+            key="overlay_page_mode"
+        )
+
+        pages_to_modify = []
+        if page_mode == "Specific pages":
+            pages_to_modify = st.multiselect(
+                "Select pages",
+                options=list(range(1, total_pages + 1)),
+                default=[1],
+                key="overlay_pages_multi"
+            )
+        elif page_mode == "Page range":
+            col1, col2 = st.columns(2)
+            with col1:
+                start_p = st.number_input("From page", 1, total_pages, 1, key="overlay_start")
+            with col2:
+                end_p = st.number_input("To page", 1, total_pages, total_pages, key="overlay_end")
+            if start_p <= end_p:
+                pages_to_modify = list(range(start_p, end_p + 1))
+                st.write(f"Pages: **{start_p} – {end_p}** ({len(pages_to_modify)} pages)")
+            else:
+                st.warning("Start page cannot be greater than end page.")
+        else:
+            pages_to_modify = list(range(1, total_pages + 1))
+            st.write(f"All **{total_pages}** pages will be modified.")
+
+        st.markdown("---")
         st.subheader("3️⃣ Configure overlay")
 
-        # ===== NEW: Fixed vs Movable =====
+        # Fixed vs Movable
         placement_mode = st.radio(
             "Placement mode",
             options=["Fixed (permanent)", "Movable (annotation)"],
             horizontal=True,
             key="placement_mode",
-            help="Fixed = permanently stamped into the page. Movable = can be moved/edited later in PDF readers."
+            help="Fixed = permanently stamped into the page. Movable = can be moved/edited later in PDF readers (Text only)."
         )
 
         if add_type == "Text":
@@ -870,8 +993,11 @@ with tab5:
             with col2:
                 text_color = st.color_picker("Text color", value="#FF0000", key="text_color")
             with col3:
-                opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity",
-                                   disabled=(placement_mode.startswith("Movable")))
+                opacity = st.slider(
+                    "Opacity", 0.1, 1.0, 0.7, 0.05,
+                    key="text_opacity",
+                    disabled=placement_mode.startswith("Movable")
+                )
 
             if placement_mode.startswith("Movable"):
                 st.caption("Note: Opacity is not supported for movable annotations.")
@@ -912,7 +1038,7 @@ with tab5:
         else:  # Image
             if placement_mode.startswith("Movable"):
                 st.warning("Movable mode is currently supported only for **Text**. Images will be applied as Fixed.")
-            
+
             image_file = st.file_uploader(
                 "Upload image (PNG / JPG)",
                 type=["png", "jpg", "jpeg"],
@@ -996,7 +1122,7 @@ with tab5:
                                     pages_to_modify,
                                     text_content,
                                     pos_x, pos_y,
-                                    font_size,
+                                    int(font_size),
                                     text_color
                                 )
                             else:
@@ -1010,7 +1136,7 @@ with tab5:
                                     overlay_pdf_bytes, pages_to_modify, overlay
                                 )
                         else:
-                            # Image is always Fixed for now
+                            # Image always Fixed
                             if keep_ratio:
                                 aspect = img.height / img.width
                                 final_height = img_width * aspect
