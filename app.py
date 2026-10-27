@@ -5,12 +5,20 @@ import re
 import random
 import string
 import io
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.colors import Color, HexColor
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from PIL import Image as PILImage
+
+# Optional dependencies
+try:
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.colors import HexColor
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+
+try:
+    from PIL import Image as PILImage
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 # ======================
 # Page Config
@@ -242,19 +250,15 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
     return None
 
 # =====================================================
-# NEW: Add Text / Image to PDF helpers
+# Add Text / Image helpers
 # =====================================================
 def create_text_overlay(page_width, page_height, text, x, y, font_size, color_hex, opacity=1.0):
-    """Create a single-page PDF overlay containing the text."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
-    
-    # Convert hex color
     try:
         color = HexColor(color_hex)
     except Exception:
         color = HexColor("#000000")
-    
     c.setFillColor(color, alpha=opacity)
     c.setFont("Helvetica", font_size)
     c.drawString(x, y, text)
@@ -263,45 +267,30 @@ def create_text_overlay(page_width, page_height, text, x, y, font_size, color_he
     return PdfReader(packet)
 
 def create_image_overlay(page_width, page_height, image_bytes, x, y, width, height, opacity=1.0):
-    """Create a single-page PDF overlay containing the image."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
-    
-    # Save image temporarily in memory
     img = PILImage.open(io.BytesIO(image_bytes))
     img_buffer = io.BytesIO()
-    # Convert to RGB if necessary (for JPEG compatibility)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
     img.save(img_buffer, format="PNG")
     img_buffer.seek(0)
-    
     c.setFillAlpha(opacity)
     c.drawImage(img_buffer, x, y, width=width, height=height, mask='auto')
     c.save()
     packet.seek(0)
     return PdfReader(packet)
 
-def add_overlay_to_pdf(pdf_bytes: bytes, pages_to_modify: list, overlay_reader, position="absolute"):
-    """Merge the overlay onto selected pages of the original PDF."""
+def add_overlay_to_pdf(pdf_bytes: bytes, pages_to_modify: list, overlay_reader):
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
-    
     selected_set = set(pages_to_modify)
-    
     for i, page in enumerate(reader.pages):
         page_num = i + 1
         if page_num in selected_set:
-            # Get page size
-            page_width = float(page.mediabox.width)
-            page_height = float(page.mediabox.height)
-            
-            # The overlay was created with the same page size
             overlay_page = overlay_reader.pages[0]
             page.merge_page(overlay_page)
-        
         writer.add_page(page)
-    
     buffer = io.BytesIO()
     writer.write(buffer)
     buffer.seek(0)
@@ -836,10 +825,22 @@ with tab4:
             st.caption(f"File size: {len(st.session_state.converted_docx) / 1024:.1f} KB")
 
 # =====================================================
-# TAB 5: Add Text / Image (NEW)
+# TAB 5: Add Text / Image
 # =====================================================
 with tab5:
     st.subheader("Add Text or Image to PDF")
+
+    if not REPORTLAB_AVAILABLE:
+        st.error("Missing required package: **reportlab**")
+        st.markdown("Please add this line to your `requirements.txt` and reboot the app:")
+        st.code("reportlab", language="text")
+        st.stop()
+
+    if not PIL_AVAILABLE:
+        st.error("Missing required package: **Pillow**")
+        st.code("Pillow", language="text")
+        st.stop()
+
     st.markdown("Upload a PDF → Choose text or image → Position it → Apply to selected pages → Download")
 
     overlay_file = st.file_uploader(
@@ -854,7 +855,6 @@ with tab5:
         try:
             reader = PdfReader(io.BytesIO(overlay_pdf_bytes))
             total_pages = len(reader.pages)
-            # Get first page size for reference
             first_page = reader.pages[0]
             page_width = float(first_page.mediabox.width)
             page_height = float(first_page.mediabox.height)
@@ -916,7 +916,7 @@ with tab5:
 
         if add_type == "Text":
             text_content = st.text_input("Text to add", value="Confidential", key="overlay_text")
-            
+
             col1, col2, col3 = st.columns(3)
             with col1:
                 font_size = st.number_input("Font size", min_value=8, max_value=120, value=24, key="font_size")
@@ -926,31 +926,43 @@ with tab5:
                 opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity")
 
             st.markdown("**Position** (from bottom-left corner, in points)")
-            colx, coly = st.columns(2)
-            with colx:
-                pos_x = st.number_input("X position", value=50.0, key="text_x")
-            with coly:
-                pos_y = st.number_input("Y position", value=page_height - 50, key="text_y")
 
-            # Quick position presets
+            # Initialize session state BEFORE widgets
+            if "text_x" not in st.session_state:
+                st.session_state.text_x = 50.0
+            if "text_y" not in st.session_state:
+                st.session_state.text_y = page_height - 50
+
+            # Preset buttons FIRST
             st.caption("Quick positions:")
             pcols = st.columns(4)
+
             if pcols[0].button("Top-Left", key="tl"):
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = page_height - 50
                 st.rerun()
+
             if pcols[1].button("Top-Right", key="tr"):
-                st.session_state.text_x = page_width - 200
+                st.session_state.text_x = max(50.0, page_width - 200)
                 st.session_state.text_y = page_height - 50
                 st.rerun()
+
             if pcols[2].button("Bottom-Left", key="bl"):
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = 30.0
                 st.rerun()
+
             if pcols[3].button("Center", key="ct"):
                 st.session_state.text_x = page_width / 2 - 50
                 st.session_state.text_y = page_height / 2
                 st.rerun()
+
+            # Number inputs AFTER presets
+            colx, coly = st.columns(2)
+            with colx:
+                pos_x = st.number_input("X position", key="text_x")
+            with coly:
+                pos_y = st.number_input("Y position", key="text_y")
 
         else:  # Image
             image_file = st.file_uploader(
@@ -958,7 +970,7 @@ with tab5:
                 type=["png", "jpg", "jpeg"],
                 key="overlay_image"
             )
-            
+
             if image_file:
                 img_bytes = image_file.read()
                 img = PILImage.open(io.BytesIO(img_bytes))
@@ -968,7 +980,6 @@ with tab5:
                 with col1:
                     img_width = st.number_input("Image width (pts)", min_value=20.0, value=150.0, key="img_w")
                 with col2:
-                    # Keep aspect ratio option
                     keep_ratio = st.checkbox("Keep aspect ratio", value=True, key="keep_ratio")
                     if keep_ratio:
                         aspect = img.height / img.width
@@ -980,31 +991,46 @@ with tab5:
                 opacity = st.slider("Opacity", 0.1, 1.0, 0.8, 0.05, key="img_opacity")
 
                 st.markdown("**Position** (from bottom-left corner)")
-                colx, coly = st.columns(2)
-                with colx:
-                    pos_x = st.number_input("X position", value=50.0, key="img_x")
-                with coly:
-                    pos_y = st.number_input("Y position", value=page_height - 180, key="img_y")
 
-                # Quick positions
+                # Initialize session state
+                if "img_x" not in st.session_state:
+                    st.session_state.img_x = 50.0
+                if "img_y" not in st.session_state:
+                    st.session_state.img_y = page_height - 180
+
+                # Calculate final height for presets
+                final_h = img_height if keep_ratio else (img_height if not keep_ratio else 100)
+
+                # Preset buttons FIRST
                 st.caption("Quick positions:")
                 pcols = st.columns(4)
+
                 if pcols[0].button("Top-Left", key="img_tl"):
                     st.session_state.img_x = 50.0
-                    st.session_state.img_y = page_height - img_height - 20
+                    st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
+
                 if pcols[1].button("Top-Right", key="img_tr"):
                     st.session_state.img_x = page_width - img_width - 20
-                    st.session_state.img_y = page_height - img_height - 20
+                    st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
+
                 if pcols[2].button("Bottom-Right", key="img_br"):
                     st.session_state.img_x = page_width - img_width - 20
                     st.session_state.img_y = 20.0
                     st.rerun()
+
                 if pcols[3].button("Center", key="img_ct"):
                     st.session_state.img_x = (page_width - img_width) / 2
-                    st.session_state.img_y = (page_height - img_height) / 2
+                    st.session_state.img_y = (page_height - final_h) / 2
                     st.rerun()
+
+                # Number inputs AFTER presets
+                colx, coly = st.columns(2)
+                with colx:
+                    pos_x = st.number_input("X position", key="img_x")
+                with coly:
+                    pos_y = st.number_input("Y position", key="img_y")
 
         st.markdown("---")
         st.subheader("4️⃣ Apply & Download")
@@ -1014,7 +1040,7 @@ with tab5:
             if add_type == "Text" and not text_content.strip():
                 st.warning("Please enter some text.")
                 can_proceed = False
-            if add_type == "Image" and image_file is None:
+            if add_type == "Image" and (image_file is None):
                 st.warning("Please upload an image.")
                 can_proceed = False
 
@@ -1028,13 +1054,12 @@ with tab5:
                                 font_size, text_color, opacity
                             )
                         else:
-                            # Recalculate height if keep_ratio
                             if keep_ratio:
                                 aspect = img.height / img.width
                                 final_height = img_width * aspect
                             else:
                                 final_height = img_height
-                            
+
                             overlay = create_image_overlay(
                                 page_width, page_height,
                                 img_bytes, pos_x, pos_y,
@@ -1054,7 +1079,7 @@ with tab5:
                 original_name = overlay_file.name
                 if original_name.lower().endswith(".pdf"):
                     original_name = original_name[:-4]
-                
+
                 custom_name = st.text_input(
                     "Download file name",
                     value=f"{original_name}_with_overlay.pdf",
