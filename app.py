@@ -849,78 +849,17 @@ with tab5:
         st.code("Pillow", language="text")
         st.stop()
 
-    st.markdown("Upload a PDF → Choose text or image → Position it → Apply to selected pages → Download")
-
-    overlay_file = st.file_uploader(
-        "Upload a PDF file",
-        type=["pdf"],
-        accept_multiple_files=False,
-        key="overlay_uploader"
-    )
-
-    if overlay_file is not None:
-        overlay_pdf_bytes = overlay_file.read()
-        try:
-            reader = PdfReader(io.BytesIO(overlay_pdf_bytes))
-            total_pages = len(reader.pages)
-            first_page = reader.pages[0]
-            page_width = float(first_page.mediabox.width)
-            page_height = float(first_page.mediabox.height)
-        except Exception as e:
-            st.error(f"Cannot read this PDF: {e}")
-            st.stop()
-
-        st.success(f"✅ Uploaded: **{overlay_file.name}**")
-        st.info(f"This PDF has **{total_pages}** page(s) • Page size: {page_width:.0f} × {page_height:.0f} pts")
-
-        with st.expander("👁️ Preview original PDF", expanded=False):
-            preview_pdf(overlay_pdf_bytes, key="overlay_original_preview")
-
-        st.markdown("---")
-        st.subheader("1️⃣ Choose what to add")
-
-        add_type = st.radio(
-            "Add",
-            options=["Text", "Image"],
-            horizontal=True,
-            key="add_type"
-        )
-
-        st.markdown("---")
-        st.subheader("2️⃣ Select pages")
-
-        page_mode = st.radio(
-            "Apply to",
-            options=["Specific pages", "Page range", "All pages"],
-            horizontal=True,
-            key="overlay_page_mode"
-        )
-
-        pages_to_modify = []
-        if page_mode == "Specific pages":
-            pages_to_modify = st.multiselect(
-                "Select pages",
-                options=list(range(1, total_pages + 1)),
-                default=[1],
-                key="overlay_pages_multi"
-            )
-        elif page_mode == "Page range":
-            col1, col2 = st.columns(2)
-            with col1:
-                start_p = st.number_input("From page", 1, total_pages, 1, key="overlay_start")
-            with col2:
-                end_p = st.number_input("To page", 1, total_pages, total_pages, key="overlay_end")
-            if start_p <= end_p:
-                pages_to_modify = list(range(start_p, end_p + 1))
-                st.write(f"Pages: **{start_p} – {end_p}** ({len(pages_to_modify)} pages)")
-            else:
-                st.warning("Start page cannot be greater than end page.")
-        else:
-            pages_to_modify = list(range(1, total_pages + 1))
-            st.write(f"All **{total_pages}** pages will be modified.")
-
-        st.markdown("---")
+    st.markdown("---")
         st.subheader("3️⃣ Configure overlay")
+
+        # ===== NEW: Fixed vs Movable =====
+        placement_mode = st.radio(
+            "Placement mode",
+            options=["Fixed (permanent)", "Movable (annotation)"],
+            horizontal=True,
+            key="placement_mode",
+            help="Fixed = permanently stamped into the page. Movable = can be moved/edited later in PDF readers."
+        )
 
         if add_type == "Text":
             text_content = st.text_input("Text to add", value="Confidential", key="overlay_text")
@@ -931,17 +870,19 @@ with tab5:
             with col2:
                 text_color = st.color_picker("Text color", value="#FF0000", key="text_color")
             with col3:
-                opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity")
+                opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity",
+                                   disabled=(placement_mode.startswith("Movable")))
+
+            if placement_mode.startswith("Movable"):
+                st.caption("Note: Opacity is not supported for movable annotations.")
 
             st.markdown("**Position** (from bottom-left corner, in points)")
 
-            # Initialize session state BEFORE widgets
             if "text_x" not in st.session_state:
                 st.session_state.text_x = 50.0
             if "text_y" not in st.session_state:
                 st.session_state.text_y = page_height - 50
 
-            # Preset buttons FIRST
             st.caption("Quick positions:")
             pcols = st.columns(4)
 
@@ -949,23 +890,19 @@ with tab5:
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = page_height - 50
                 st.rerun()
-
             if pcols[1].button("Top-Right", key="tr"):
                 st.session_state.text_x = max(50.0, page_width - 200)
                 st.session_state.text_y = page_height - 50
                 st.rerun()
-
             if pcols[2].button("Bottom-Left", key="bl"):
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = 30.0
                 st.rerun()
-
             if pcols[3].button("Center", key="ct"):
                 st.session_state.text_x = page_width / 2 - 50
                 st.session_state.text_y = page_height / 2
                 st.rerun()
 
-            # Number inputs AFTER presets
             colx, coly = st.columns(2)
             with colx:
                 pos_x = st.number_input("X position", key="text_x")
@@ -973,6 +910,9 @@ with tab5:
                 pos_y = st.number_input("Y position", key="text_y")
 
         else:  # Image
+            if placement_mode.startswith("Movable"):
+                st.warning("Movable mode is currently supported only for **Text**. Images will be applied as Fixed.")
+            
             image_file = st.file_uploader(
                 "Upload image (PNG / JPG)",
                 type=["png", "jpg", "jpeg"],
@@ -1000,16 +940,13 @@ with tab5:
 
                 st.markdown("**Position** (from bottom-left corner)")
 
-                # Initialize session state
                 if "img_x" not in st.session_state:
                     st.session_state.img_x = 50.0
                 if "img_y" not in st.session_state:
                     st.session_state.img_y = page_height - 180
 
-                # Calculate final height for presets
                 final_h = img_height if keep_ratio else img_height
 
-                # Preset buttons FIRST
                 st.caption("Quick positions:")
                 pcols = st.columns(4)
 
@@ -1017,23 +954,19 @@ with tab5:
                     st.session_state.img_x = 50.0
                     st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
-
                 if pcols[1].button("Top-Right", key="img_tr"):
                     st.session_state.img_x = page_width - img_width - 20
                     st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
-
                 if pcols[2].button("Bottom-Right", key="img_br"):
                     st.session_state.img_x = page_width - img_width - 20
                     st.session_state.img_y = 20.0
                     st.rerun()
-
                 if pcols[3].button("Center", key="img_ct"):
                     st.session_state.img_x = (page_width - img_width) / 2
                     st.session_state.img_y = (page_height - final_h) / 2
                     st.rerun()
 
-                # Number inputs AFTER presets
                 colx, coly = st.columns(2)
                 with colx:
                     pos_x = st.number_input("X position", key="img_x")
@@ -1056,12 +989,28 @@ with tab5:
                 with st.spinner("Adding overlay to PDF..."):
                     try:
                         if add_type == "Text":
-                            overlay = create_text_overlay(
-                                page_width, page_height,
-                                text_content, pos_x, pos_y,
-                                font_size, text_color, opacity
-                            )
+                            if placement_mode.startswith("Movable"):
+                                # Movable FreeText annotation
+                                result_bytes = add_text_annotation(
+                                    overlay_pdf_bytes,
+                                    pages_to_modify,
+                                    text_content,
+                                    pos_x, pos_y,
+                                    font_size,
+                                    text_color
+                                )
+                            else:
+                                # Fixed (permanent)
+                                overlay = create_text_overlay(
+                                    page_width, page_height,
+                                    text_content, pos_x, pos_y,
+                                    font_size, text_color, opacity
+                                )
+                                result_bytes = add_overlay_to_pdf(
+                                    overlay_pdf_bytes, pages_to_modify, overlay
+                                )
                         else:
+                            # Image is always Fixed for now
                             if keep_ratio:
                                 aspect = img.height / img.width
                                 final_height = img_width * aspect
@@ -1073,12 +1022,13 @@ with tab5:
                                 img_bytes, pos_x, pos_y,
                                 img_width, final_height, opacity
                             )
+                            result_bytes = add_overlay_to_pdf(
+                                overlay_pdf_bytes, pages_to_modify, overlay
+                            )
 
-                        result_bytes = add_overlay_to_pdf(
-                            overlay_pdf_bytes, pages_to_modify, overlay
-                        )
                         st.session_state.overlay_result = result_bytes
-                        st.success(f"✅ Overlay applied to {len(pages_to_modify)} page(s)!")
+                        mode_msg = "movable annotation" if (add_type == "Text" and placement_mode.startswith("Movable")) else "fixed overlay"
+                        st.success(f"✅ {mode_msg.capitalize()} applied to {len(pages_to_modify)} page(s)!")
                     except Exception as e:
                         st.error(f"Failed to apply overlay: {e}")
 
