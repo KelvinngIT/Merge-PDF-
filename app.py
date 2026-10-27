@@ -10,6 +10,7 @@ import io
 try:
     from reportlab.pdfgen import canvas
     from reportlab.lib.colors import HexColor
+    from reportlab.lib.utils import ImageReader
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -267,16 +268,23 @@ def create_text_overlay(page_width, page_height, text, x, y, font_size, color_he
     return PdfReader(packet)
 
 def create_image_overlay(page_width, page_height, image_bytes, x, y, width, height, opacity=1.0):
+    """Create a single-page PDF overlay containing the image."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
+
+    # Open and normalize the image
     img = PILImage.open(io.BytesIO(image_bytes))
-    img_buffer = io.BytesIO()
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
+
+    # Save to BytesIO and wrap with ImageReader (required by reportlab)
+    img_buffer = io.BytesIO()
     img.save(img_buffer, format="PNG")
     img_buffer.seek(0)
+    img_reader = ImageReader(img_buffer)
+
     c.setFillAlpha(opacity)
-    c.drawImage(img_buffer, x, y, width=width, height=height, mask='auto')
+    c.drawImage(img_reader, x, y, width=width, height=height, mask='auto')
     c.save()
     packet.seek(0)
     return PdfReader(packet)
@@ -999,7 +1007,7 @@ with tab5:
                     st.session_state.img_y = page_height - 180
 
                 # Calculate final height for presets
-                final_h = img_height if keep_ratio else (img_height if not keep_ratio else 100)
+                final_h = img_height if keep_ratio else img_height
 
                 # Preset buttons FIRST
                 st.caption("Quick positions:")
