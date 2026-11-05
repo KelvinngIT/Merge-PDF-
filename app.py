@@ -5,6 +5,7 @@ import re
 import random
 import string
 import io
+import zipfile
 
 # Optional dependencies
 try:
@@ -250,9 +251,6 @@ def preview_and_edit_pdf(pdf_bytes: bytes, key: str = "pdf_edit", max_pages: int
                 return None
     return None
 
-# =====================================================
-# Add Text / Image helpers
-# =====================================================
 def create_text_overlay(page_width, page_height, text, x, y, font_size, color_hex, opacity=1.0):
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
@@ -268,21 +266,15 @@ def create_text_overlay(page_width, page_height, text, x, y, font_size, color_he
     return PdfReader(packet)
 
 def create_image_overlay(page_width, page_height, image_bytes, x, y, width, height, opacity=1.0):
-    """Create a single-page PDF overlay containing the image."""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(page_width, page_height))
-
-    # Open and normalize the image
     img = PILImage.open(io.BytesIO(image_bytes))
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
-
-    # Save to BytesIO and wrap with ImageReader (required by reportlab)
     img_buffer = io.BytesIO()
     img.save(img_buffer, format="PNG")
     img_buffer.seek(0)
     img_reader = ImageReader(img_buffer)
-
     c.setFillAlpha(opacity)
     c.drawImage(img_reader, x, y, width=width, height=height, mask='auto')
     c.save()
@@ -303,6 +295,47 @@ def add_overlay_to_pdf(pdf_bytes: bytes, pages_to_modify: list, overlay_reader):
     writer.write(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
+# ======================
+# NEW: PDF to Images Function
+# ======================
+def pdf_to_images(pdf_bytes: bytes, dpi: int = 150, image_format: str = "PNG"):
+    """
+    Convert PDF pages to images.
+    Returns a list of dicts containing page number, image bytes, PIL image and extension.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        raise ImportError("Missing package: pypdfium2\nInstall with: pip install pypdfium2")
+
+    pdf = pdfium.PdfDocument(pdf_bytes)
+    results = []
+    scale = dpi / 72.0
+
+    for i in range(len(pdf)):
+        page = pdf[i]
+        bitmap = page.render(scale=scale)
+        pil_image = bitmap.to_pil()
+
+        img_buffer = io.BytesIO()
+        if image_format.upper() in ("JPEG", "JPG"):
+            if pil_image.mode in ("RGBA", "P"):
+                pil_image = pil_image.convert("RGB")
+            pil_image.save(img_buffer, format="JPEG", quality=92)
+            ext = "jpg"
+        else:
+            pil_image.save(img_buffer, format="PNG")
+            ext = "png"
+
+        img_buffer.seek(0)
+        results.append({
+            "page": i + 1,
+            "bytes": img_buffer.getvalue(),
+            "pil": pil_image,
+            "ext": ext
+        })
+    return results
 
 # ======================
 # Session State Init
@@ -331,6 +364,10 @@ if "extracted_text" not in st.session_state:
     st.session_state.extracted_text = None
 if "overlay_result" not in st.session_state:
     st.session_state.overlay_result = None
+if "pdf_images" not in st.session_state:
+    st.session_state.pdf_images = None
+if "pdf_images_name" not in st.session_state:
+    st.session_state.pdf_images_name = None
 
 # ======================
 # Sidebar - Login + Support
@@ -395,6 +432,8 @@ else:
         st.session_state.converted_docx = None
         st.session_state.extracted_text = None
         st.session_state.overlay_result = None
+        st.session_state.pdf_images = None
+        st.session_state.pdf_images_name = None
         st.rerun()
 
 # Support the Writer
@@ -408,6 +447,7 @@ st.sidebar.markdown(
     '</a>',
     unsafe_allow_html=True
 )
+
 # ======================
 # Main App
 # ======================
@@ -419,12 +459,13 @@ if not st.session_state.logged_in:
 st.title("📄 PDF Tools")
 st.markdown(f"Welcome, **{st.session_state.user_email}**!")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🔗 Combine Multiple PDFs",
     "📄 Select Pages & Download",
     "🔄 Rotate Pages",
     "📝 PDF to Word",
-    "✏️ Add Text / Image"
+    "✏️ Add Text / Image",
+    "🖼️ PDF to Images"
 ])
 
 # =====================================================
@@ -836,27 +877,22 @@ with tab4:
 # =====================================================
 with tab5:
     st.subheader("Add Text or Image to PDF")
-
     if not REPORTLAB_AVAILABLE:
         st.error("Missing required package: **reportlab**")
-        st.markdown("Please add this line to your `requirements.txt` and reboot the app:")
-        st.code("reportlab", language="text")
+        st.code("pip install reportlab", language="bash")
         st.stop()
-
     if not PIL_AVAILABLE:
         st.error("Missing required package: **Pillow**")
-        st.code("Pillow", language="text")
+        st.code("pip install Pillow", language="bash")
         st.stop()
 
     st.markdown("Upload a PDF → Choose text or image → Position it → Apply to selected pages → Download")
-
     overlay_file = st.file_uploader(
         "Upload a PDF file",
         type=["pdf"],
         accept_multiple_files=False,
         key="overlay_uploader"
     )
-
     if overlay_file is not None:
         overlay_pdf_bytes = overlay_file.read()
         try:
@@ -868,33 +904,26 @@ with tab5:
         except Exception as e:
             st.error(f"Cannot read this PDF: {e}")
             st.stop()
-
         st.success(f"✅ Uploaded: **{overlay_file.name}**")
         st.info(f"This PDF has **{total_pages}** page(s) • Page size: {page_width:.0f} × {page_height:.0f} pts")
-
         with st.expander("👁️ Preview original PDF", expanded=False):
             preview_pdf(overlay_pdf_bytes, key="overlay_original_preview")
-
         st.markdown("---")
         st.subheader("1️⃣ Choose what to add")
-
         add_type = st.radio(
             "Add",
             options=["Text", "Image"],
             horizontal=True,
             key="add_type"
         )
-
         st.markdown("---")
         st.subheader("2️⃣ Select pages")
-
         page_mode = st.radio(
             "Apply to",
             options=["Specific pages", "Page range", "All pages"],
             horizontal=True,
             key="overlay_page_mode"
         )
-
         pages_to_modify = []
         if page_mode == "Specific pages":
             pages_to_modify = st.multiselect(
@@ -917,13 +946,10 @@ with tab5:
         else:
             pages_to_modify = list(range(1, total_pages + 1))
             st.write(f"All **{total_pages}** pages will be modified.")
-
         st.markdown("---")
         st.subheader("3️⃣ Configure overlay")
-
         if add_type == "Text":
             text_content = st.text_input("Text to add", value="Confidential", key="overlay_text")
-
             col1, col2, col3 = st.columns(3)
             with col1:
                 font_size = st.number_input("Font size", min_value=8, max_value=120, value=24, key="font_size")
@@ -931,58 +957,44 @@ with tab5:
                 text_color = st.color_picker("Text color", value="#FF0000", key="text_color")
             with col3:
                 opacity = st.slider("Opacity", 0.1, 1.0, 0.7, 0.05, key="text_opacity")
-
             st.markdown("**Position** (from bottom-left corner, in points)")
-
-            # Initialize session state BEFORE widgets
             if "text_x" not in st.session_state:
                 st.session_state.text_x = 50.0
             if "text_y" not in st.session_state:
                 st.session_state.text_y = page_height - 50
-
-            # Preset buttons FIRST
             st.caption("Quick positions:")
             pcols = st.columns(4)
-
             if pcols[0].button("Top-Left", key="tl"):
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = page_height - 50
                 st.rerun()
-
             if pcols[1].button("Top-Right", key="tr"):
                 st.session_state.text_x = max(50.0, page_width - 200)
                 st.session_state.text_y = page_height - 50
                 st.rerun()
-
             if pcols[2].button("Bottom-Left", key="bl"):
                 st.session_state.text_x = 50.0
                 st.session_state.text_y = 30.0
                 st.rerun()
-
             if pcols[3].button("Center", key="ct"):
                 st.session_state.text_x = page_width / 2 - 50
                 st.session_state.text_y = page_height / 2
                 st.rerun()
-
-            # Number inputs AFTER presets
             colx, coly = st.columns(2)
             with colx:
                 pos_x = st.number_input("X position", key="text_x")
             with coly:
                 pos_y = st.number_input("Y position", key="text_y")
-
-        else:  # Image
+        else:
             image_file = st.file_uploader(
                 "Upload image (PNG / JPG)",
                 type=["png", "jpg", "jpeg"],
                 key="overlay_image"
             )
-
             if image_file:
                 img_bytes = image_file.read()
                 img = PILImage.open(io.BytesIO(img_bytes))
                 st.image(img, caption="Uploaded image", width=200)
-
                 col1, col2 = st.columns(2)
                 with col1:
                     img_width = st.number_input("Image width (pts)", min_value=20.0, value=150.0, key="img_w")
@@ -994,54 +1006,38 @@ with tab5:
                         st.write(f"Height will be: **{img_height:.1f}** pts")
                     else:
                         img_height = st.number_input("Image height (pts)", min_value=20.0, value=100.0, key="img_h")
-
                 opacity = st.slider("Opacity", 0.1, 1.0, 0.8, 0.05, key="img_opacity")
-
                 st.markdown("**Position** (from bottom-left corner)")
-
-                # Initialize session state
                 if "img_x" not in st.session_state:
                     st.session_state.img_x = 50.0
                 if "img_y" not in st.session_state:
                     st.session_state.img_y = page_height - 180
-
-                # Calculate final height for presets
                 final_h = img_height if keep_ratio else img_height
-
-                # Preset buttons FIRST
                 st.caption("Quick positions:")
                 pcols = st.columns(4)
-
                 if pcols[0].button("Top-Left", key="img_tl"):
                     st.session_state.img_x = 50.0
                     st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
-
                 if pcols[1].button("Top-Right", key="img_tr"):
                     st.session_state.img_x = page_width - img_width - 20
                     st.session_state.img_y = page_height - final_h - 20
                     st.rerun()
-
                 if pcols[2].button("Bottom-Right", key="img_br"):
                     st.session_state.img_x = page_width - img_width - 20
                     st.session_state.img_y = 20.0
                     st.rerun()
-
                 if pcols[3].button("Center", key="img_ct"):
                     st.session_state.img_x = (page_width - img_width) / 2
                     st.session_state.img_y = (page_height - final_h) / 2
                     st.rerun()
-
-                # Number inputs AFTER presets
                 colx, coly = st.columns(2)
                 with colx:
                     pos_x = st.number_input("X position", key="img_x")
                 with coly:
                     pos_y = st.number_input("Y position", key="img_y")
-
         st.markdown("---")
         st.subheader("4️⃣ Apply & Download")
-
         if pages_to_modify:
             can_proceed = True
             if add_type == "Text" and not text_content.strip():
@@ -1050,7 +1046,6 @@ with tab5:
             if add_type == "Image" and (image_file is None):
                 st.warning("Please upload an image.")
                 can_proceed = False
-
             if can_proceed and st.button("✨ Apply Overlay", type="primary", use_container_width=True, key="apply_overlay"):
                 with st.spinner("Adding overlay to PDF..."):
                     try:
@@ -1066,13 +1061,11 @@ with tab5:
                                 final_height = img_width * aspect
                             else:
                                 final_height = img_height
-
                             overlay = create_image_overlay(
                                 page_width, page_height,
                                 img_bytes, pos_x, pos_y,
                                 img_width, final_height, opacity
                             )
-
                         result_bytes = add_overlay_to_pdf(
                             overlay_pdf_bytes, pages_to_modify, overlay
                         )
@@ -1080,13 +1073,11 @@ with tab5:
                         st.success(f"✅ Overlay applied to {len(pages_to_modify)} page(s)!")
                     except Exception as e:
                         st.error(f"Failed to apply overlay: {e}")
-
             if st.session_state.overlay_result is not None:
                 st.markdown("---")
                 original_name = overlay_file.name
                 if original_name.lower().endswith(".pdf"):
                     original_name = original_name[:-4]
-
                 custom_name = st.text_input(
                     "Download file name",
                     value=f"{original_name}_with_overlay.pdf",
@@ -1094,7 +1085,6 @@ with tab5:
                 )
                 if not custom_name.lower().endswith(".pdf"):
                     custom_name += ".pdf"
-
                 st.download_button(
                     label="📥 Download PDF with Overlay",
                     data=st.session_state.overlay_result,
@@ -1105,8 +1095,129 @@ with tab5:
                     key="download_overlay"
                 )
                 st.caption(f"File size: {len(st.session_state.overlay_result) / 1024:.1f} KB")
-
                 with st.expander("👁️ Preview result", expanded=True):
                     preview_pdf(st.session_state.overlay_result, key="overlay_result_preview", max_pages=6)
         else:
             st.warning("Please select at least one page.")
+
+# =====================================================
+# TAB 6: PDF to Images  (NEW)
+# =====================================================
+with tab6:
+    st.subheader("Convert PDF Pages to Images")
+    st.markdown("Upload a PDF → Convert pages to high-quality **PNG / JPEG** images → Download individually or as ZIP")
+
+    pdf_img_file = st.file_uploader(
+        "Upload a PDF file",
+        type=["pdf"],
+        accept_multiple_files=False,
+        key="pdf_to_img_uploader"
+    )
+
+    if pdf_img_file is not None:
+        pdf_bytes = pdf_img_file.read()
+
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            total_pages = len(reader.pages)
+        except Exception as e:
+            st.error(f"Cannot read this PDF: {e}")
+            st.stop()
+
+        st.success(f"✅ Uploaded: **{pdf_img_file.name}**")
+        st.info(f"This PDF has **{total_pages}** page(s)")
+
+        st.markdown("---")
+        st.subheader("1️⃣ Settings")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            dpi = st.select_slider(
+                "Image Quality (DPI)",
+                options=[72, 100, 150, 200, 250, 300],
+                value=150,
+                help="Higher DPI = better quality but larger file size"
+            )
+        with col2:
+            img_format = st.selectbox(
+                "Image Format",
+                options=["PNG", "JPEG"],
+                index=0
+            )
+        with col3:
+            page_mode = st.radio(
+                "Pages to convert",
+                options=["All pages", "Select pages"],
+                horizontal=True,
+                key="img_page_mode"
+            )
+
+        selected_pages = list(range(1, total_pages + 1))
+        if page_mode == "Select pages":
+            selected_pages = st.multiselect(
+                "Choose pages",
+                options=list(range(1, total_pages + 1)),
+                default=list(range(1, min(6, total_pages + 1))),
+                key="img_selected_pages"
+            )
+
+        st.markdown("---")
+        st.subheader("2️⃣ Convert")
+
+        if st.button("🖼️ Convert PDF to Images", type="primary", use_container_width=True, key="convert_to_img_btn"):
+            if not selected_pages:
+                st.warning("Please select at least one page.")
+            else:
+                with st.spinner(f"Converting {len(selected_pages)} page(s) at {dpi} DPI..."):
+                    try:
+                        all_images = pdf_to_images(pdf_bytes, dpi=dpi, image_format=img_format)
+                        images = [img for img in all_images if img["page"] in selected_pages]
+                        st.session_state.pdf_images = images
+                        st.session_state.pdf_images_name = pdf_img_file.name
+                        st.success(f"✅ Successfully converted **{len(images)}** page(s)!")
+                    except Exception as e:
+                        st.error(f"Conversion failed: {e}")
+
+        # Show results + download
+        if st.session_state.pdf_images:
+            images = st.session_state.pdf_images
+            original_name = st.session_state.pdf_images_name
+            if original_name.lower().endswith(".pdf"):
+                original_name = original_name[:-4]
+
+            st.markdown("---")
+            st.subheader("3️⃣ Download Images")
+
+            st.markdown("**Preview & Download individual pages:**")
+            cols = st.columns(3)
+            for idx, img in enumerate(images):
+                with cols[idx % 3]:
+                    st.image(img["pil"], caption=f"Page {img['page']}", use_container_width=True)
+                    st.download_button(
+                        label=f"📥 Page {img['page']}",
+                        data=img["bytes"],
+                        file_name=f"{original_name}_page_{img['page']:02d}.{img['ext']}",
+                        mime=f"image/{img['ext']}",
+                        key=f"dl_img_{img['page']}_{idx}"
+                    )
+
+            # ZIP download
+            st.markdown("---")
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for img in images:
+                    zf.writestr(
+                        f"{original_name}_page_{img['page']:02d}.{img['ext']}",
+                        img["bytes"]
+                    )
+            zip_buffer.seek(0)
+
+            st.download_button(
+                label="📦 Download All Pages as ZIP",
+                data=zip_buffer.getvalue(),
+                file_name=f"{original_name}_images.zip",
+                mime="application/zip",
+                use_container_width=True,
+                type="primary",
+                key="download_zip_images"
+            )
