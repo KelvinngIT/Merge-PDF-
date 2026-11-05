@@ -401,13 +401,7 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.subheader("💖 Support the Writer")
 st.sidebar.markdown("If this tool helped you, consider buying me a coffee!")
-SUPPORT_URL = "https://buymeacoffee.com/itmasterngw"
-st.sidebar.link_button(
-    "☕ Buy Me a Coffee",
-    SUPPORT_URL,
-    use_container_width=True,
-    type="primary"
-)
+<script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="itmasterngw" data-color="#FFDD00" data-emoji="" data-font="Cookie" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#000000" data-coffee-color="#ffffff" ></script>
 
 # ======================
 # Main App
